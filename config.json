@@ -4,7 +4,9 @@
     "slogan": "Seu ambiente na temperatura ideal.",
     "whatsapp": "5554991666600",
     "cidade_base": "Não-Me-Toque/RS",
-    "regiao_texto": "Atendimento em Não-Me-Toque e região"
+    "regiao_texto": "Atendimento em Não-Me-Toque e região",
+    "local_atendimento": "Não-Me-Toque/RS",
+    "texto_atendimento": "Atendimento em Não-Me-Toque e região"
   },
   "servicos": {
     "Instalação": {
@@ -15,8 +17,8 @@
       "precos": {
         "9.000 BTUs": 100.0,
         "12.000 BTUs": 280.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
+        "18.000 BTUs": 350.0,
+        "24.000 BTUs": 400.0
       }
     },
     "Higienização": {
@@ -31,73 +33,28 @@
         "24.000 BTUs": 0.0
       }
     },
-    "Manutenção": {
-      "icone": "🔧",
-      "ativo": true,
-      "mostrar_cliente": true,
-      "descricao": "Avaliação e manutenção do equipamento.",
-      "precos": {
-        "9.000 BTUs": 0.0,
-        "12.000 BTUs": 0.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
-      }
-    },
     "Desinstalação": {
       "icone": "📦",
       "ativo": true,
       "mostrar_cliente": true,
       "descricao": "Retirada do aparelho instalado.",
       "precos": {
-        "9.000 BTUs": 0.0,
-        "12.000 BTUs": 0.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
+        "9.000 BTUs": 120.0,
+        "12.000 BTUs": 120.0,
+        "18.000 BTUs": 160.0,
+        "24.000 BTUs": 200.0
       }
     },
-    "Reinstalação": {
-      "icone": "♻️",
+    "Carga de gás": {
       "ativo": true,
       "mostrar_cliente": true,
-      "descricao": "Reinstalação de aparelho já existente.",
+      "descricao": "Carga de gás refrigerante conforme capacidade do equipamento.",
       "precos": {
-        "9.000 BTUs": 0.0,
-        "12.000 BTUs": 0.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
+        "9.000 BTUs": 280.0,
+        "12.000 BTUs": 280.0,
+        "18.000 BTUs": 400.0,
+        "24.000 BTUs": 480.0
       }
-    }
-  },
-  "adicionais": {
-    "Apartamento": {
-      "mostrar_cliente": true,
-      "descricao": "Instalação ou serviço em apartamento.",
-      "preco": 0.0
-    },
-    "Instalação em altura": {
-      "mostrar_cliente": true,
-      "descricao": "Local que pode exigir trabalho em altura.",
-      "preco": 0.0
-    },
-    "Acesso difícil": {
-      "mostrar_cliente": true,
-      "descricao": "Local com acesso mais complexo.",
-      "preco": 0.0
-    },
-    "Retirada de aparelho antigo": {
-      "mostrar_cliente": true,
-      "descricao": "Existe aparelho antigo para retirada.",
-      "preco": 0.0
-    },
-    "Pode precisar de material adicional": {
-      "mostrar_cliente": true,
-      "descricao": "Tubulação, cabo, canaleta ou outros materiais adicionais.",
-      "preco": 0.0
-    },
-    "Adequação ou reparo": {
-      "mostrar_cliente": true,
-      "descricao": "Pode ser necessária alguma adequação ou reparo.",
-      "preco": 0.0
     }
   },
   "materiais": {
@@ -164,12 +121,16 @@
       "tipo": "Inverter",
       "preco": 1820.0,
       "material_metro": "",
-      "permitir_metragem_cliente": true
+      "permitir_metragem_cliente": true,
+      "id": "eq_1791079198"
     }
   },
   "regras": {
     "adicional_apartamento_2_piso_ou_mais": 0.0,
     "texto_preco_equipamento": "O valor do equipamento é uma estimativa aproximada e pode variar conforme a disponibilidade e a cotação do fornecedor no dia. O valor final será confirmado pela F Climatização antes do fechamento do orçamento.",
-    "texto_estimativa": "Este orçamento é uma estimativa inicial. O valor final pode variar conforme as condições reais do local, acesso, altura, materiais adicionais e necessidades identificadas na avaliação. Qualquer alteração será informada antes da execução."
+    "texto_estimativa": "Este orçamento é uma estimativa inicial. O valor final pode variar conforme as condições reais do local, acesso, altura, materiais adicionais e necessidades identificadas na avaliação. Qualquer alteração será informada antes da execução.",
+    "adicional_apartamento_2_mais": 0.0,
+    "texto_variacao": "Esta é uma estimativa inicial. O valor final pode variar conforme materiais necessários, acesso, altura, condições do local e avaliação técnica.",
+    "texto_equipamento": "O valor do equipamento é uma referência aproximada e pode variar conforme disponibilidade e cotação do fornecedor no dia. O valor final será confirmado antes do fechamento."
   }
 }
