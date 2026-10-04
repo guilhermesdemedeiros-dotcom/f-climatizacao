@@ -10,6 +10,12 @@ from datetime import datetime
 import os
 import copy
 import uuid
+import time
+
+try:
+    from streamlit_local_storage import LocalStorage
+except Exception:
+    LocalStorage = None
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT, TA_RIGHT
@@ -256,17 +262,6 @@ DEFAULT_CONFIG = {
                 "24.000 BTUs": 0.0,
             },
         },
-        "Manutenção": {
-            "ativo": True,
-            "mostrar_cliente": True,
-            "descricao": "Avaliação e manutenção do equipamento.",
-            "precos": {
-                "9.000 BTUs": 0.0,
-                "12.000 BTUs": 0.0,
-                "18.000 BTUs": 0.0,
-                "24.000 BTUs": 0.0,
-            },
-        },
     },
     "materiais": {
         'Tubo de cobre 1/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
@@ -311,8 +306,9 @@ def completar_dict(base, padrao):
 def migrar_config(dados):
     dados = completar_dict(dados, DEFAULT_CONFIG)
 
-    # Reinstalação deixa de existir
+    # Serviços removidos do catálogo padrão
     dados.get("servicos", {}).pop("Reinstalação", None)
+    dados.get("servicos", {}).pop("Manutenção", None)
 
     # Adicionais específicos antigos deixam de ser usados
     dados.pop("adicionais", None)
@@ -369,6 +365,183 @@ def carregar_config():
 
 
 config = carregar_config()
+
+
+# =========================================================
+# RASCUNHO TEMPORÁRIO DO CLIENTE
+# =========================================================
+
+DRAFT_STORAGE_KEY = "f_climatizacao_orcamento_rascunho_v1"
+DRAFT_TTL_SECONDS = 5 * 60
+
+CLIENT_DRAFT_FIELDS = [
+    "cliente_possui",
+    "cliente_equipamento",
+    "cliente_capacidade_compra",
+    "cliente_capacidade",
+    "cliente_servicos",
+    "cliente_tipo_imovel",
+    "cliente_andar",
+    "cliente_area",
+    "cliente_adicional_sim",
+    "cliente_adicional_desc",
+    "cliente_observacoes",
+    "cliente_nome",
+    "cliente_telefone",
+    "cliente_cidade",
+]
+
+LOCAL_STORAGE = LocalStorage() if LocalStorage is not None else None
+
+
+def _normalizar_payload_local(raw):
+    if raw in (None, "", {}):
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+    return None
+
+
+def restaurar_rascunho_cliente():
+    """
+    Restaura um rascunho salvo no navegador se ele tiver menos de 5 minutos.
+    Os dados ficam somente no navegador até o orçamento ser confirmado.
+    """
+    if LOCAL_STORAGE is None:
+        return
+
+    if st.session_state.get("_rascunho_restaurado", False):
+        return
+
+    try:
+        raw = LOCAL_STORAGE.getItem(
+            DRAFT_STORAGE_KEY,
+            key="fclima_draft_get",
+        )
+    except Exception:
+        return
+
+    payload = _normalizar_payload_local(raw)
+    if not payload:
+        return
+
+    try:
+        expira_em = float(payload.get("expira_em", 0))
+    except Exception:
+        expira_em = 0
+
+    if expira_em <= time.time():
+        try:
+            LOCAL_STORAGE.setItem(
+                DRAFT_STORAGE_KEY,
+                "",
+                key="fclima_draft_expired_clear",
+            )
+        except Exception:
+            pass
+        st.session_state["_rascunho_restaurado"] = True
+        return
+
+    dados = payload.get("dados", {})
+    if not isinstance(dados, dict):
+        st.session_state["_rascunho_restaurado"] = True
+        return
+
+    alterou = False
+    for campo in CLIENT_DRAFT_FIELDS:
+        if campo in dados and campo not in st.session_state:
+            st.session_state[campo] = dados[campo]
+            alterou = True
+
+    st.session_state["_rascunho_restaurado"] = True
+
+    if alterou:
+        st.session_state["_mostrar_aviso_rascunho"] = True
+        st.rerun()
+
+
+def salvar_rascunho_cliente():
+    """
+    Mantém o formulário atual por até 5 minutos no armazenamento local do navegador.
+    Só grava novamente quando algum campo do formulário muda.
+    """
+    if LOCAL_STORAGE is None:
+        return
+
+    dados = {}
+    for campo in CLIENT_DRAFT_FIELDS:
+        if campo in st.session_state:
+            valor = st.session_state[campo]
+            if isinstance(valor, tuple):
+                valor = list(valor)
+            dados[campo] = valor
+
+    if not dados:
+        return
+
+    assinatura = json.dumps(
+        dados,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+    if assinatura == st.session_state.get("_rascunho_ultima_assinatura"):
+        return
+
+    payload = {
+        "salvo_em": time.time(),
+        "expira_em": time.time() + DRAFT_TTL_SECONDS,
+        "dados": dados,
+    }
+
+    try:
+        LOCAL_STORAGE.setItem(
+            DRAFT_STORAGE_KEY,
+            json.dumps(payload, ensure_ascii=False),
+            key="fclima_draft_set",
+        )
+        st.session_state["_rascunho_ultima_assinatura"] = assinatura
+    except Exception:
+        pass
+
+
+def limpar_rascunho_cliente():
+    if LOCAL_STORAGE is not None:
+        try:
+            LOCAL_STORAGE.setItem(
+                DRAFT_STORAGE_KEY,
+                "",
+                key="fclima_draft_clear",
+            )
+        except Exception:
+            pass
+
+    for campo in CLIENT_DRAFT_FIELDS:
+        st.session_state.pop(campo, None)
+
+    st.session_state.pop("_rascunho_ultima_assinatura", None)
+    st.session_state["_rascunho_restaurado"] = True
+
+
+def garantir_opcao_valida(chave, opcoes, multiplo=False):
+    if chave not in st.session_state:
+        return
+
+    if multiplo:
+        atual = st.session_state.get(chave, [])
+        if not isinstance(atual, list):
+            atual = list(atual) if isinstance(atual, tuple) else []
+        st.session_state[chave] = [x for x in atual if x in opcoes]
+    else:
+        if st.session_state.get(chave) not in opcoes:
+            st.session_state.pop(chave, None)
+
 
 # =========================================================
 # GITHUB API
@@ -858,16 +1031,6 @@ def gerar_pdf(orcamento):
 
     obs = orcamento.get("observacoes", "")
     adicional = orcamento.get("adicional", {})
-    if adicional.get("solicitado"):
-        desc = adicional.get("descricao", "").strip()
-        if desc:
-            obs_extra = f"O cliente informou necessidade adicional: {desc}."
-        else:
-            obs_extra = (
-                "O cliente indicou possível necessidade de serviço ou material adicional. "
-                "O valor final poderá ser ajustado após avaliação técnica."
-            )
-        obs = (obs + "\n" + obs_extra).strip()
 
     if obs:
         story += [
@@ -876,21 +1039,53 @@ def gerar_pdf(orcamento):
             Spacer(1, 4 * mm),
         ]
 
-    cond = config["regras"].get("texto_variacao", "")
-    story += [
-        KeepTogether(
+    destaques = []
+
+    if adicional.get("solicitado"):
+        desc = adicional.get("descricao", "").strip()
+        if desc:
+            texto_adicional = f"<b>Adicional informado pelo cliente:</b> {desc}. Valor sujeito à avaliação."
+        else:
+            texto_adicional = (
+                "<b>Adicional informado pelo cliente.</b> "
+                "O valor poderá ser ajustado após avaliação."
+            )
+        destaques.append([Paragraph(texto_adicional, normal)])
+
+    destaques.append(
+        [
+            Paragraph(
+                "<b>Orçamento estimado.</b> "
+                "Valores podem variar conforme materiais, disponibilidade e condições do serviço.",
+                normal,
+            )
+        ]
+    )
+
+    destaques.append(
+        [
+            Paragraph(
+                "<b>Confirme o valor atualizado com a F Climatização antes do fechamento.</b>",
+                normal,
+            )
+        ]
+    )
+
+    destaque_tbl = Table(destaques, colWidths=[174 * mm])
+    destaque_tbl.setStyle(
+        TableStyle(
             [
-                Paragraph("<b>Condições importantes</b>", title_style),
-                Paragraph(cond, normal),
-                Spacer(1, 2 * mm),
-                Paragraph(
-                    "Equipamentos para venda têm valor de referência sujeito à disponibilidade e à cotação do fornecedor no dia. "
-                    "O valor final é confirmado antes do fechamento.",
-                    normal,
-                ),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF7EE")),
+                ("BOX", (0, 0), (-1, -1), 0.8, laranja),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#F3D8BE")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
             ]
         )
-    ]
+    )
+    story += [Spacer(1, 2 * mm), destaque_tbl]
 
     doc.build(story)
     buffer.seek(0)
@@ -1407,6 +1602,11 @@ def pagina_admin():
 # =========================================================
 
 def pagina_cliente():
+    restaurar_rascunho_cliente()
+
+    if st.session_state.pop("_mostrar_aviso_rascunho", False):
+        st.info("Seu orçamento em andamento foi restaurado.")
+
     cabecalho(admin=False)
 
     st.markdown(
@@ -1423,9 +1623,17 @@ def pagina_cliente():
 
     secao("Seu aparelho", "Informe se já possui o equipamento ou deseja comprar.")
 
+    opcoes_possui = [
+        "Sim, já tenho o aparelho",
+        "Não, quero comprar",
+        "Ainda estou avaliando",
+    ]
+    garantir_opcao_valida("cliente_possui", opcoes_possui)
+
     possui = st.radio(
         "Você já possui o aparelho?",
-        ["Sim, já tenho o aparelho", "Não, quero comprar", "Ainda estou avaliando"],
+        opcoes_possui,
+        key="cliente_possui",
     )
 
     equipamento_id = None
@@ -1440,11 +1648,21 @@ def pagina_cliente():
 
         if ativos:
             mapa = {nome_equipamento(eq): eid for eid, eq in ativos}
-            escolha = st.selectbox("Escolha o aparelho", list(mapa.keys()))
+            nomes_equipamentos = list(mapa.keys())
+            garantir_opcao_valida("cliente_equipamento", nomes_equipamentos)
+
+            escolha = st.selectbox(
+                "Escolha o aparelho",
+                nomes_equipamentos,
+                key="cliente_equipamento",
+            )
             equipamento_id = mapa[escolha]
             equipamento = config["equipamentos"][equipamento_id]
             capacidade = equipamento.get("capacidade", "9.000 BTUs")
-            st.caption(f"Preço-base do equipamento: {dinheiro(equipamento.get('preco',0))}")
+
+            st.caption(
+                f"Preço-base do equipamento: {dinheiro(equipamento.get('preco', 0))}"
+            )
             st.markdown(
                 f"""
                 <div class="orange-card">
@@ -1455,24 +1673,51 @@ def pagina_cliente():
                 unsafe_allow_html=True,
             )
         else:
-            capacidade = st.selectbox("Capacidade desejada", CAPACIDADES)
-            st.info("Nenhum aparelho está disponível no catálogo no momento. A equipe confirmará as opções pelo WhatsApp.")
+            garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
+            capacidade = st.selectbox(
+                "Capacidade desejada",
+                CAPACIDADES,
+                key="cliente_capacidade_compra",
+            )
+            st.info(
+                "Nenhum aparelho está disponível no catálogo no momento. "
+                "A equipe confirmará as opções pelo WhatsApp."
+            )
     else:
-        capacidade = st.selectbox("Capacidade do aparelho", CAPACIDADES + ["Não sei"])
+        opcoes_capacidade = CAPACIDADES + ["Não sei"]
+        garantir_opcao_valida("cliente_capacidade", opcoes_capacidade)
+        capacidade = st.selectbox(
+            "Capacidade do aparelho",
+            opcoes_capacidade,
+            key="cliente_capacidade",
+        )
 
     secao("Serviços", "Selecione um ou mais serviços.")
 
     servicos_ativos = [
         nome
         for nome, dados in config["servicos"].items()
-        if dados.get("ativo", True) and dados.get("mostrar_cliente", True)
+        if dados.get("ativo", True)
+        and dados.get("mostrar_cliente", True)
     ]
+    garantir_opcao_valida("cliente_servicos", servicos_ativos, multiplo=True)
 
-    servicos = st.multiselect("Serviços desejados", servicos_ativos)
+    servicos = st.multiselect(
+        "Serviços desejados",
+        servicos_ativos,
+        key="cliente_servicos",
+    )
 
     secao("Local do serviço", "Informações que ajudam a calcular a estimativa.")
 
-    tipo_imovel = st.selectbox("Tipo de imóvel", ["Casa", "Apartamento", "Comércio", "Outro"])
+    tipos_imovel = ["Casa", "Apartamento", "Comércio", "Outro"]
+    garantir_opcao_valida("cliente_tipo_imovel", tipos_imovel)
+
+    tipo_imovel = st.selectbox(
+        "Tipo de imóvel",
+        tipos_imovel,
+        key="cliente_tipo_imovel",
+    )
 
     andar = 0
     if tipo_imovel == "Apartamento":
@@ -1481,12 +1726,27 @@ def pagina_cliente():
             min_value=0,
             value=1,
             step=1,
-            help="A partir do 2º piso pode haver adicional, conforme configuração da empresa.",
+            help=(
+                "A partir do 2º piso pode haver adicional, "
+                "conforme configuração da empresa."
+            ),
+            key="cliente_andar",
         )
+
+    opcoes_area = [
+        "Não sei",
+        "Até 10 m²",
+        "11 a 15 m²",
+        "16 a 20 m²",
+        "21 a 30 m²",
+        "Mais de 30 m²",
+    ]
+    garantir_opcao_valida("cliente_area", opcoes_area)
 
     area = st.selectbox(
         "Tamanho aproximado do ambiente",
-        ["Não sei", "Até 10 m²", "11 a 15 m²", "16 a 20 m²", "21 a 30 m²", "Mais de 30 m²"],
+        opcoes_area,
+        key="cliente_area",
     )
 
     secao(
@@ -1494,10 +1754,14 @@ def pagina_cliente():
         "Use somente se existir algo além das opções acima.",
     )
 
+    opcoes_adicional = ["Não", "Sim"]
+    garantir_opcao_valida("cliente_adicional_sim", opcoes_adicional)
+
     adicional_sim = st.radio(
         "Precisa de algum serviço ou material adicional?",
-        ["Não", "Sim"],
+        opcoes_adicional,
         horizontal=True,
+        key="cliente_adicional_sim",
     )
 
     adicional_desc = ""
@@ -1505,18 +1769,36 @@ def pagina_cliente():
         adicional_desc = st.text_area(
             "Se quiser, descreva o adicional",
             placeholder="Ex.: material extra, ajuste elétrico, acesso especial...",
+            key="cliente_adicional_desc",
         )
+    else:
+        st.session_state.pop("cliente_adicional_desc", None)
 
     observacoes = st.text_area(
         "Outras observações",
         placeholder="Informações que possam ajudar no atendimento.",
+        key="cliente_observacoes",
     )
 
     secao("Seus dados", "Preencha para identificar e registrar o orçamento.")
 
-    nome_cliente = st.text_input("Nome")
-    telefone = st.text_input("Telefone / WhatsApp")
-    cidade = st.text_input("Cidade")
+    nome_cliente = st.text_input(
+        "Nome",
+        key="cliente_nome",
+    )
+    telefone = st.text_input(
+        "Telefone / WhatsApp",
+        key="cliente_telefone",
+    )
+    cidade = st.text_input(
+        "Cidade",
+        key="cliente_cidade",
+    )
+
+    # Salva automaticamente o andamento no navegador.
+    # Se o iPhone suspender/recarregar o Streamlit, os campos podem ser
+    # restaurados por até 5 minutos.
+    salvar_rascunho_cliente()
 
     if st.button("GERAR ORÇAMENTO", type="primary", use_container_width=True):
         if not nome_cliente.strip():
@@ -1549,7 +1831,9 @@ def pagina_cliente():
         if cap_calculo:
             for nome_servico in servicos:
                 dados = config["servicos"][nome_servico]
-                valor = float(dados.get("precos", {}).get(cap_calculo, 0) or 0)
+                valor = float(
+                    dados.get("precos", {}).get(cap_calculo, 0) or 0
+                )
                 itens.append(
                     montar_item(
                         f"{nome_servico} • {cap_calculo}",
@@ -1572,7 +1856,13 @@ def pagina_cliente():
                 )
 
         if tipo_imovel == "Apartamento" and int(andar) >= 2:
-            valor_andar = float(config["regras"].get("adicional_apartamento_2_mais", 0) or 0)
+            valor_andar = float(
+                config["regras"].get(
+                    "adicional_apartamento_2_mais",
+                    0,
+                )
+                or 0
+            )
             if valor_andar > 0:
                 itens.append(
                     montar_item(
@@ -1613,6 +1903,10 @@ def pagina_cliente():
             orcamentos.append(novo)
             salvar_orcamentos(orcamentos)
             st.session_state["ultimo_orcamento"] = novo
+
+            # Orçamento concluído: apaga o rascunho temporário.
+            limpar_rascunho_cliente()
+
             st.success(f"Orçamento {numero} salvo com sucesso.")
         except Exception as e:
             st.error(f"Não foi possível salvar o orçamento: {e}")
@@ -1632,19 +1926,28 @@ def pagina_cliente():
             qtd = float(item.get("quantidade", 0) or 0)
             vu = float(item.get("valor_unitario", 0) or 0)
             st.write(
-                f"**{item.get('descricao','')}** — {qtd:g} {item.get('unidade','')} × "
+                f"**{item.get('descricao','')}** — "
+                f"{qtd:g} {item.get('unidade','')} × "
                 f"{dinheiro(vu)} = **{dinheiro(qtd * vu)}**"
             )
 
         if ultimo.get("adicional", {}).get("solicitado"):
             desc = ultimo.get("adicional", {}).get("descricao", "").strip()
             texto = (
-                f"O cliente informou a seguinte necessidade adicional: {desc}"
+                f"Adicional informado pelo cliente: {desc}. "
+                "Valor sujeito à avaliação."
                 if desc
-                else "O cliente indicou possível necessidade de serviço ou material adicional. O valor final poderá sofrer ajuste após avaliação técnica."
+                else
+                "Adicional informado pelo cliente. "
+                "O valor poderá ser ajustado após avaliação."
             )
             st.markdown(
-                f'<div class="orange-card"><div class="card-title">Solicitação adicional</div><div class="card-text">{texto}</div></div>',
+                (
+                    '<div class="orange-card">'
+                    '<div class="card-title">Solicitação adicional</div>'
+                    f'<div class="card-text">{texto}</div>'
+                    '</div>'
+                ),
                 unsafe_allow_html=True,
             )
 
@@ -1678,7 +1981,8 @@ def pagina_cliente():
         )
 
         st.caption(
-            "Para enviar o PDF pelo WhatsApp, toque em Compartilhar PDF e escolha o WhatsApp na folha de compartilhamento do celular."
+            "Para enviar o PDF pelo WhatsApp, toque em Compartilhar PDF "
+            "e escolha o WhatsApp na folha de compartilhamento do celular."
         )
 
     st.markdown(
@@ -1693,8 +1997,12 @@ def pagina_cliente():
 
     with st.expander("Área administrativa"):
         st.caption("Acesso exclusivo da administração.")
-        if st.button("Acessar painel administrativo", use_container_width=True):
+        if st.button(
+            "Acessar painel administrativo",
+            use_container_width=True,
+        ):
             st.session_state["pagina"] = "admin"
+            st.query_params["modo"] = "admin"
             st.rerun()
 
 
