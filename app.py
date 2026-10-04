@@ -1,243 +1,300 @@
 import streamlit as st
+import json
+import base64
+import urllib.request
+import urllib.error
 from urllib.parse import quote
-from datetime import datetime
-
-# =========================================================
-# F CLIMATIZAÇÃO - V3
-# =========================================================
 
 st.set_page_config(
     page_title="F Climatização",
     page_icon="❄️",
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="centered"
 )
 
 # =========================================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÃO DO GITHUB
 # =========================================================
 
-EMPRESA = {
-    "nome": "F Climatização",
-    "slogan": "Seu ambiente na temperatura ideal",
-    "whatsapp": "5555999999999",  # ALTERAR DEPOIS
+GITHUB_OWNER = "guilhermesdemedeiros-dotcom"
+GITHUB_REPO = "f-climatizacao"
+GITHUB_BRANCH = "main"
+CONFIG_FILE = "config.json"
+
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
+
+
+# =========================================================
+# CONFIGURAÇÃO PADRÃO
+# =========================================================
+
+DEFAULT_CONFIG = {
+    "empresa": {
+        "nome": "F Climatização",
+        "slogan": "Seu ambiente na temperatura ideal",
+        "whatsapp": "5555999999999"
+    },
+
+    "servicos": {
+        "Instalação": {
+            "icone": "🛠️",
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Instalação padrão de ar-condicionado Split.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0
+            }
+        },
+        "Higienização": {
+            "icone": "🧼",
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Limpeza e higienização do aparelho.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0
+            }
+        },
+        "Manutenção": {
+            "icone": "🔧",
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Avaliação e manutenção do equipamento.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0
+            }
+        },
+        "Desinstalação": {
+            "icone": "📦",
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Retirada do aparelho instalado.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0
+            }
+        },
+        "Reinstalação": {
+            "icone": "♻️",
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Reinstalação de aparelho já existente.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0
+            }
+        }
+    },
+
+    "adicionais": {
+        "Apartamento": {
+            "mostrar_cliente": True,
+            "descricao": "Instalação ou serviço em apartamento.",
+            "preco": 0.0
+        },
+        "Instalação em altura": {
+            "mostrar_cliente": True,
+            "descricao": "Local que pode exigir trabalho em altura.",
+            "preco": 0.0
+        },
+        "Acesso difícil": {
+            "mostrar_cliente": True,
+            "descricao": "Local com acesso mais complexo.",
+            "preco": 0.0
+        },
+        "Retirada de aparelho antigo": {
+            "mostrar_cliente": True,
+            "descricao": "Existe aparelho antigo para retirada.",
+            "preco": 0.0
+        },
+        "Pode precisar de material adicional": {
+            "mostrar_cliente": True,
+            "descricao": "Tubulação, cabo, canaleta ou outros materiais adicionais.",
+            "preco": 0.0
+        },
+        "Adequação ou reparo": {
+            "mostrar_cliente": True,
+            "descricao": "Pode ser necessária alguma adequação ou reparo.",
+            "preco": 0.0
+        }
+    },
+
+    "materiais": {
+        'Tubo de cobre 1/4"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 3/8"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 1/2"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 5/8"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 3/4"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Canaleta": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Cabo elétrico": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Mangueira de dreno": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Suporte para condensadora": {
+            "unidade": "unidade",
+            "preco": 0.0,
+            "ativo": True
+        }
+    },
+
+    "equipamentos": {
+        "Split 9.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 12.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 18.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 24.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        }
+    }
 }
 
-CHAVE_ADMIN = "fclima2026"
-
-CAPACIDADES = [
-    "9.000 BTUs",
-    "12.000 BTUs",
-    "18.000 BTUs",
-    "24.000 BTUs",
-]
 
 # =========================================================
-# SERVIÇOS
+# ARQUIVO LOCAL
 # =========================================================
 
-SERVICOS = {
-    "Instalação": {
-        "icone": "🛠️",
-        "ativo": True,
-        "mostrar_cliente": True,
-        "descricao": "Instalação padrão de ar-condicionado Split.",
-        "precos": {
-            "9.000 BTUs": 500.00,
-            "12.000 BTUs": 550.00,
-            "18.000 BTUs": 650.00,
-            "24.000 BTUs": 750.00,
-        },
-    },
+def carregar_config():
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
+            return json.load(arquivo)
+    except Exception:
+        return DEFAULT_CONFIG.copy()
 
-    "Higienização": {
-        "icone": "✨",
-        "ativo": True,
-        "mostrar_cliente": True,
-        "descricao": "Limpeza e higienização do equipamento.",
-        "precos": {
-            "9.000 BTUs": 180.00,
-            "12.000 BTUs": 180.00,
-            "18.000 BTUs": 220.00,
-            "24.000 BTUs": 250.00,
-        },
-    },
 
-    "Manutenção": {
-        "icone": "🔧",
-        "ativo": True,
-        "mostrar_cliente": True,
-        "descricao": "Avaliação de problema ou funcionamento do aparelho.",
-        "precos": {
-            "9.000 BTUs": 150.00,
-            "12.000 BTUs": 150.00,
-            "18.000 BTUs": 180.00,
-            "24.000 BTUs": 180.00,
-        },
-    },
+config = carregar_config()
 
-    "Desinstalação": {
-        "icone": "♻️",
-        "ativo": True,
-        "mostrar_cliente": True,
-        "descricao": "Retirada do aparelho instalado.",
-        "precos": {
-            "9.000 BTUs": 250.00,
-            "12.000 BTUs": 250.00,
-            "18.000 BTUs": 300.00,
-            "24.000 BTUs": 300.00,
-        },
-    },
-
-    "Reinstalação": {
-        "icone": "🔄",
-        "ativo": True,
-        "mostrar_cliente": True,
-        "descricao": "Retirada e instalação do aparelho em outro local.",
-        "precos": {
-            "9.000 BTUs": 700.00,
-            "12.000 BTUs": 750.00,
-            "18.000 BTUs": 850.00,
-            "24.000 BTUs": 900.00,
-        },
-    },
-}
 
 # =========================================================
-# SITUAÇÕES / ADICIONAIS
-# O cliente só informa.
-# Não somamos automaticamente nesta versão.
+# SALVAR NO GITHUB
 # =========================================================
 
-ADICIONAIS = {
-    "Apartamento": {
-        "mostrar_cliente": True,
-        "descricao": "O serviço será realizado em apartamento.",
-        "preco": 0.00,
-    },
+def github_request(url, method="GET", data=None):
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "F-Climatizacao"
+    }
 
-    "Instalação em altura": {
-        "mostrar_cliente": True,
-        "descricao": "Aparelho ou condensadora em local elevado.",
-        "preco": 0.00,
-    },
+    body = None
 
-    "Acesso difícil": {
-        "mostrar_cliente": True,
-        "descricao": "O local pode apresentar dificuldade de acesso.",
-        "preco": 0.00,
-    },
+    if data is not None:
+        body = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
 
-    "Retirada de aparelho antigo": {
-        "mostrar_cliente": True,
-        "descricao": "Existe outro aparelho que precisa ser retirado.",
-        "preco": 0.00,
-    },
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers=headers,
+        method=method
+    )
 
-    "Pode precisar de material adicional": {
-        "mostrar_cliente": True,
-        "descricao": "Pode ser necessário material além da instalação padrão.",
-        "preco": 0.00,
-    },
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
 
-    "Adequação ou reparo": {
-        "mostrar_cliente": True,
-        "descricao": "Existe alguma instalação antiga ou ponto que pode precisar de ajuste.",
-        "preco": 0.00,
-    },
-}
 
-# =========================================================
-# MATERIAIS - CONTROLE INTERNO
-# =========================================================
+def salvar_config_github(nova_config):
 
-MATERIAIS = {
-    'Tubo de cobre 1/4"': {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    if not GITHUB_TOKEN:
+        raise Exception("GITHUB_TOKEN não encontrado nos Secrets.")
 
-    'Tubo de cobre 3/8"': {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    url = (
+        f"https://api.github.com/repos/"
+        f"{GITHUB_OWNER}/{GITHUB_REPO}/contents/{CONFIG_FILE}"
+    )
 
-    'Tubo de cobre 1/2"': {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    sha = None
 
-    'Tubo de cobre 5/8"': {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    try:
+        atual = github_request(
+            url + f"?ref={quote(GITHUB_BRANCH)}"
+        )
+        sha = atual.get("sha")
 
-    'Tubo de cobre 3/4"': {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    except urllib.error.HTTPError as erro:
+        if erro.code != 404:
+            raise
 
-    "Canaleta": {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    conteudo = json.dumps(
+        nova_config,
+        ensure_ascii=False,
+        indent=2
+    )
 
-    "Cabo elétrico": {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    payload = {
+        "message": "Atualiza configurações pelo painel ADM",
+        "content": base64.b64encode(
+            conteudo.encode("utf-8")
+        ).decode("utf-8"),
+        "branch": GITHUB_BRANCH
+    }
 
-    "Mangueira de dreno": {
-        "unidade": "metro",
-        "preco": 0.00,
-        "ativo": True,
-    },
+    if sha:
+        payload["sha"] = sha
 
-    "Suporte para condensadora": {
-        "unidade": "unidade",
-        "preco": 0.00,
-        "ativo": True,
-    },
-}
+    return github_request(
+        url,
+        method="PUT",
+        data=payload
+    )
 
-# =========================================================
-# EQUIPAMENTOS
-# =========================================================
-
-EQUIPAMENTOS = {
-    "Split 9.000 BTUs": {
-        "preco": 0.00,
-        "ativo": False,
-    },
-
-    "Split 12.000 BTUs": {
-        "preco": 0.00,
-        "ativo": False,
-    },
-
-    "Split 18.000 BTUs": {
-        "preco": 0.00,
-        "ativo": False,
-    },
-
-    "Split 24.000 BTUs": {
-        "preco": 0.00,
-        "ativo": False,
-    },
-}
 
 # =========================================================
 # FUNÇÕES
 # =========================================================
 
-def moeda(valor):
+def dinheiro(valor):
     return (
         f"R$ {valor:,.2f}"
         .replace(",", "X")
@@ -246,849 +303,641 @@ def moeda(valor):
     )
 
 
-def numero_orcamento():
-    return datetime.now().strftime("%d%m%y%H%M")
+def link_whatsapp(texto):
+    numero = "".join(
+        c for c in config["empresa"]["whatsapp"]
+        if c.isdigit()
+    )
 
+    return (
+        f"https://wa.me/{numero}"
+        f"?text={quote(texto)}"
+    )
 
-def limpar_orcamento():
-    manter = {"admin_logado"}
-
-    for chave in list(st.session_state.keys()):
-        if chave not in manter:
-            del st.session_state[chave]
-
-
-# =========================================================
-# VISUAL
-# =========================================================
-
-st.markdown(
-    """
-<style>
-
-header {
-    visibility: hidden;
-}
-
-#MainMenu {
-    visibility: hidden;
-}
-
-footer {
-    visibility: hidden;
-}
-
-.block-container {
-    max-width: 680px;
-    padding-top: 1rem;
-    padding-bottom: 5rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
-}
-
-.logo {
-    text-align: center;
-    font-size: 1.9rem;
-    font-weight: 850;
-    margin-top: 5px;
-}
-
-.slogan {
-    text-align: center;
-    opacity: .65;
-    font-size: .92rem;
-    margin-bottom: 25px;
-}
-
-.titulo {
-    font-size: 1.55rem;
-    font-weight: 800;
-    margin-bottom: 6px;
-}
-
-.texto {
-    opacity: .72;
-    margin-bottom: 18px;
-    line-height: 1.45;
-}
-
-.card {
-    border: 1px solid rgba(128,128,128,.25);
-    border-radius: 16px;
-    padding: 18px;
-    margin-top: 12px;
-    margin-bottom: 12px;
-}
-
-.resumo {
-    border: 1px solid rgba(128,128,128,.28);
-    border-radius: 17px;
-    padding: 18px;
-    margin-top: 15px;
-}
-
-.total-label {
-    text-align: center;
-    opacity: .60;
-    font-size: .85rem;
-    margin-top: 20px;
-}
-
-.total {
-    text-align: center;
-    font-size: 2rem;
-    font-weight: 850;
-    margin-bottom: 15px;
-}
-
-.aviso {
-    border: 1px solid rgba(128,128,128,.25);
-    border-radius: 15px;
-    padding: 15px;
-    margin-top: 15px;
-    font-size: .9rem;
-    line-height: 1.5;
-}
-
-.admin-tag {
-    display: inline-block;
-    border: 1px solid rgba(128,128,128,.3);
-    border-radius: 20px;
-    padding: 5px 10px;
-    font-size: .75rem;
-    margin-bottom: 10px;
-}
-
-div.stButton > button {
-    min-height: 3.1rem;
-    border-radius: 13px;
-    font-weight: 700;
-}
-
-div.stLinkButton > a {
-    min-height: 3.1rem;
-    border-radius: 13px;
-    font-weight: 700;
-}
-
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# CABEÇALHO
-# =========================================================
-
-st.markdown(
-    '<div class="logo">❄️ F Climatização</div>',
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    f'<div class="slogan">{EMPRESA["slogan"]}</div>',
-    unsafe_allow_html=True,
-)
-
-# =========================================================
-# VERIFICA MODO
-# =========================================================
-
-query = st.query_params
-modo = query.get("modo", "cliente")
-
-if isinstance(modo, list):
-    modo = modo[0]
 
 # =========================================================
 # ADMIN
 # =========================================================
 
-if modo == "admin":
+def pagina_admin():
 
-    if "admin_logado" not in st.session_state:
-        st.session_state.admin_logado = False
+    st.title("⚙️ Painel Administrativo")
+    st.caption("F Climatização")
 
-    if not st.session_state.admin_logado:
+    if not ADMIN_KEY:
+        st.error("ADMIN_KEY não configurada nos Secrets.")
+        return
 
-        st.markdown(
-            '<div class="titulo">🔐 Administrador</div>',
-            unsafe_allow_html=True,
-        )
+    if not st.session_state.get("admin_logado"):
 
-        st.write("Digite sua chave de acesso.")
-
-        chave = st.text_input(
-            "Chave",
-            type="password",
+        senha = st.text_input(
+            "Senha do administrador",
+            type="password"
         )
 
         if st.button(
             "Entrar",
             type="primary",
-            use_container_width=True,
+            use_container_width=True
         ):
-            if chave == CHAVE_ADMIN:
+            if senha == ADMIN_KEY:
                 st.session_state.admin_logado = True
                 st.rerun()
             else:
-                st.error("Chave incorreta.")
+                st.error("Senha incorreta.")
 
-        st.stop()
+        return
 
-    # =====================================================
-    # ADMIN LOGADO
-    # =====================================================
+    st.success("Administrador conectado")
 
-    st.markdown(
-        '<span class="admin-tag">ADMINISTRADOR</span>',
-        unsafe_allow_html=True,
-    )
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Serviços",
+        "Adicionais",
+        "Materiais",
+        "Aparelhos",
+        "Empresa"
+    ])
 
-    st.markdown(
-        '<div class="titulo">Painel F Climatização</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        "Controle de serviços, adicionais, materiais e equipamentos."
-    )
-
-    st.warning(
-        "Nesta versão os campos do painel servem para configurar "
-        "e testar. Alterações permanentes ainda precisam ser "
-        "colocadas no app.py e salvas por commit."
-    )
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        [
-            "Serviços",
-            "Adicionais",
-            "Materiais",
-            "Aparelhos",
-            "Empresa",
-        ]
-    )
-
-    # =====================================================
-    # ADMIN - SERVIÇOS
-    # =====================================================
+    # -----------------------------------------------------
+    # SERVIÇOS
+    # -----------------------------------------------------
 
     with tab1:
 
         st.subheader("Serviços")
 
-        for servico, dados in SERVICOS.items():
+        for nome, dados in config["servicos"].items():
 
-            with st.expander(
-                f"{dados['icone']} {servico}"
-            ):
+            with st.expander(nome):
 
-                st.checkbox(
-                    "Serviço ativo",
-                    value=dados["ativo"],
-                    key=f"adm_ativo_{servico}",
+                dados["ativo"] = st.checkbox(
+                    "Ativo",
+                    value=dados.get("ativo", True),
+                    key=f"serv_ativo_{nome}"
                 )
 
-                st.checkbox(
-                    "Mostrar para o cliente",
-                    value=dados["mostrar_cliente"],
-                    key=f"adm_cliente_{servico}",
+                dados["mostrar_cliente"] = st.checkbox(
+                    "Mostrar ao cliente",
+                    value=dados.get(
+                        "mostrar_cliente",
+                        True
+                    ),
+                    key=f"serv_mostrar_{nome}"
                 )
 
-                st.text_input(
+                dados["descricao"] = st.text_area(
                     "Descrição",
-                    value=dados["descricao"],
-                    key=f"adm_desc_{servico}",
+                    value=dados.get(
+                        "descricao",
+                        ""
+                    ),
+                    key=f"serv_desc_{nome}"
                 )
 
                 st.markdown("**Preços**")
 
-                for capacidade, preco in dados["precos"].items():
+                for capacidade in [
+                    "9.000 BTUs",
+                    "12.000 BTUs",
+                    "18.000 BTUs",
+                    "24.000 BTUs"
+                ]:
 
-                    st.number_input(
-                        capacidade,
-                        min_value=0.0,
-                        value=float(preco),
-                        step=10.0,
-                        format="%.2f",
-                        key=f"adm_preco_{servico}_{capacidade}",
+                    dados["precos"][capacidade] = (
+                        st.number_input(
+                            capacidade,
+                            min_value=0.0,
+                            value=float(
+                                dados["precos"].get(
+                                    capacidade,
+                                    0
+                                )
+                            ),
+                            step=10.0,
+                            key=(
+                                f"serv_preco_"
+                                f"{nome}_{capacidade}"
+                            )
+                        )
                     )
 
-    # =====================================================
-    # ADMIN - ADICIONAIS
-    # =====================================================
+    # -----------------------------------------------------
+    # ADICIONAIS
+    # -----------------------------------------------------
 
     with tab2:
 
-        st.subheader("Adicionais e situações especiais")
+        st.subheader("Situações adicionais")
 
-        st.caption(
-            "Itens que podem ser informados pelo cliente "
-            "quando houver alguma condição diferente."
-        )
+        for nome, dados in config["adicionais"].items():
 
-        for adicional, dados in ADICIONAIS.items():
+            with st.expander(nome):
 
-            with st.expander(adicional):
-
-                st.checkbox(
-                    "Mostrar para o cliente",
-                    value=dados["mostrar_cliente"],
-                    key=f"adm_adicional_{adicional}",
+                dados["mostrar_cliente"] = st.checkbox(
+                    "Mostrar ao cliente",
+                    value=dados.get(
+                        "mostrar_cliente",
+                        True
+                    ),
+                    key=f"adic_mostrar_{nome}"
                 )
 
-                st.text_input(
+                dados["descricao"] = st.text_area(
                     "Descrição",
-                    value=dados["descricao"],
-                    key=f"adm_adicional_desc_{adicional}",
+                    value=dados.get(
+                        "descricao",
+                        ""
+                    ),
+                    key=f"adic_desc_{nome}"
                 )
 
-                st.number_input(
-                    "Preço adicional",
+                dados["preco"] = st.number_input(
+                    "Valor adicional",
                     min_value=0.0,
-                    value=float(dados["preco"]),
+                    value=float(
+                        dados.get("preco", 0)
+                    ),
                     step=10.0,
-                    format="%.2f",
-                    key=f"adm_adicional_preco_{adicional}",
+                    key=f"adic_preco_{nome}"
                 )
 
-                st.caption(
-                    "Preço zero = avaliar e combinar com o cliente."
-                )
-
-    # =====================================================
-    # ADMIN - MATERIAIS
-    # =====================================================
+    # -----------------------------------------------------
+    # MATERIAIS
+    # -----------------------------------------------------
 
     with tab3:
 
         st.subheader("Materiais")
 
-        st.caption(
-            "Controle interno. O cliente não precisa conhecer "
-            "bitolas ou detalhes técnicos."
+        st.info(
+            "Estes itens são controlados pelo ADM. "
+            "O cliente não precisa escolher bitolas "
+            "ou materiais técnicos."
         )
 
-        for material, dados in MATERIAIS.items():
+        for nome, dados in config["materiais"].items():
 
-            with st.expander(material):
+            with st.expander(nome):
 
-                st.checkbox(
+                dados["ativo"] = st.checkbox(
                     "Ativo",
-                    value=dados["ativo"],
-                    key=f"adm_material_ativo_{material}",
+                    value=dados.get(
+                        "ativo",
+                        True
+                    ),
+                    key=f"mat_ativo_{nome}"
                 )
 
-                st.text_input(
-                    "Unidade de cobrança",
-                    value=dados["unidade"],
-                    key=f"adm_material_unidade_{material}",
+                dados["unidade"] = st.selectbox(
+                    "Cobrança",
+                    [
+                        "metro",
+                        "unidade",
+                        "serviço"
+                    ],
+                    index=(
+                        [
+                            "metro",
+                            "unidade",
+                            "serviço"
+                        ].index(
+                            dados.get(
+                                "unidade",
+                                "metro"
+                            )
+                        )
+                        if dados.get(
+                            "unidade",
+                            "metro"
+                        ) in [
+                            "metro",
+                            "unidade",
+                            "serviço"
+                        ]
+                        else 0
+                    ),
+                    key=f"mat_unidade_{nome}"
                 )
 
-                st.number_input(
+                dados["preco"] = st.number_input(
                     "Preço de venda",
                     min_value=0.0,
-                    value=float(dados["preco"]),
+                    value=float(
+                        dados.get("preco", 0)
+                    ),
                     step=1.0,
-                    format="%.2f",
-                    key=f"adm_material_preco_{material}",
+                    key=f"mat_preco_{nome}"
                 )
 
-                st.caption(
-                    f"Cobrança atual: por {dados['unidade']}."
-                )
-
-    # =====================================================
-    # ADMIN - APARELHOS
-    # =====================================================
+    # -----------------------------------------------------
+    # APARELHOS
+    # -----------------------------------------------------
 
     with tab4:
 
         st.subheader("Aparelhos para venda")
 
-        st.caption(
-            "Ative somente os aparelhos que quiser oferecer."
-        )
+        for nome, dados in config["equipamentos"].items():
 
-        for aparelho, dados in EQUIPAMENTOS.items():
+            with st.expander(nome):
 
-            with st.expander(aparelho):
-
-                st.checkbox(
+                dados["ativo"] = st.checkbox(
                     "Disponível para venda",
-                    value=dados["ativo"],
-                    key=f"adm_aparelho_ativo_{aparelho}",
+                    value=dados.get(
+                        "ativo",
+                        False
+                    ),
+                    key=f"equip_ativo_{nome}"
                 )
 
-                st.number_input(
-                    "Preço de venda",
+                dados["preco"] = st.number_input(
+                    "Preço do aparelho",
                     min_value=0.0,
-                    value=float(dados["preco"]),
+                    value=float(
+                        dados.get("preco", 0)
+                    ),
                     step=50.0,
-                    format="%.2f",
-                    key=f"adm_aparelho_preco_{aparelho}",
+                    key=f"equip_preco_{nome}"
                 )
 
-    # =====================================================
-    # ADMIN - EMPRESA
-    # =====================================================
+    # -----------------------------------------------------
+    # EMPRESA
+    # -----------------------------------------------------
 
     with tab5:
 
         st.subheader("Empresa")
 
-        st.text_input(
+        config["empresa"]["nome"] = st.text_input(
             "Nome",
-            value=EMPRESA["nome"],
+            value=config["empresa"].get(
+                "nome",
+                "F Climatização"
+            )
         )
 
-        st.text_input(
+        config["empresa"]["slogan"] = st.text_input(
             "Slogan",
-            value=EMPRESA["slogan"],
+            value=config["empresa"].get(
+                "slogan",
+                ""
+            )
         )
 
-        st.text_input(
+        config["empresa"]["whatsapp"] = st.text_input(
             "WhatsApp",
-            value=EMPRESA["whatsapp"],
+            value=config["empresa"].get(
+                "whatsapp",
+                ""
+            ),
+            help=(
+                "Use código do país + DDD + número. "
+                "Exemplo: 5554999999999"
+            )
         )
 
     st.divider()
 
     if st.button(
-        "Sair do administrador",
-        use_container_width=True,
+        "💾 Salvar alterações",
+        type="primary",
+        use_container_width=True
+    ):
+
+        try:
+
+            with st.spinner("Salvando..."):
+
+                salvar_config_github(config)
+
+            st.success(
+                "✅ Alterações salvas permanentemente!"
+            )
+
+            st.info(
+                "O Streamlit pode reiniciar o aplicativo "
+                "automaticamente para carregar a nova configuração."
+            )
+
+        except Exception as erro:
+
+            st.error(
+                f"Não foi possível salvar: {erro}"
+            )
+
+    if st.button(
+        "Sair do ADM",
+        use_container_width=True
     ):
         st.session_state.admin_logado = False
         st.rerun()
 
-    st.stop()
 
 # =========================================================
-# CLIENTE - INÍCIO
+# CLIENTE
 # =========================================================
 
-st.markdown(
-    '<div class="titulo">Vamos fazer seu orçamento?</div>',
-    unsafe_allow_html=True,
-)
+def pagina_cliente():
 
-st.markdown(
-    """
-<div class="texto">
-É rápido. Você não precisa entender de instalação:
-responda apenas o que souber.
-</div>
-""",
-    unsafe_allow_html=True,
-)
+    empresa = config["empresa"]
 
-# =========================================================
-# 1 - APARELHO
-# =========================================================
+    st.title(f"❄️ {empresa['nome']}")
+    st.caption(empresa["slogan"])
 
-st.markdown("### 1. Você já possui o ar-condicionado?")
+    st.markdown(
+        "### Solicite seu orçamento"
+    )
 
-possui_ar = st.radio(
-    "Selecione uma opção",
-    [
-        "Sim, já tenho o aparelho",
-        "Não, quero comprar",
-        "Ainda estou avaliando",
-    ],
-    label_visibility="collapsed",
-)
+    possui = st.radio(
+        "Você já possui o aparelho?",
+        [
+            "Sim, já tenho o aparelho",
+            "Não, quero comprar",
+            "Ainda estou avaliando"
+        ]
+    )
 
-capacidade = "Não sei"
-
-if possui_ar == "Sim, já tenho o aparelho":
+    capacidades = [
+        "9.000 BTUs",
+        "12.000 BTUs",
+        "18.000 BTUs",
+        "24.000 BTUs",
+        "Não sei"
+    ]
 
     capacidade = st.selectbox(
         "Qual a capacidade do aparelho?",
-        CAPACIDADES + ["Não sei"],
+        capacidades
     )
 
-elif possui_ar == "Não, quero comprar":
+    servicos_disponiveis = []
 
-    capacidade = st.selectbox(
-        "Qual capacidade você procura?",
-        CAPACIDADES + ["Não sei qual preciso"],
+    for nome, dados in config["servicos"].items():
+
+        if (
+            dados.get("ativo", True)
+            and dados.get(
+                "mostrar_cliente",
+                True
+            )
+        ):
+            servicos_disponiveis.append(nome)
+
+    servicos = st.multiselect(
+        "Qual serviço você precisa?",
+        servicos_disponiveis
     )
 
-    st.info(
-        "Se você não souber a capacidade ideal, sem problema. "
-        "A F Climatização pode orientar você."
+    tipo_imovel = st.selectbox(
+        "Tipo de imóvel",
+        [
+            "Casa",
+            "Apartamento",
+            "Comércio",
+            "Outro"
+        ]
     )
 
-# =========================================================
-# 2 - NECESSIDADE
-# =========================================================
-
-st.markdown("### 2. O que você precisa?")
-
-opcoes_servicos = []
-
-for nome, dados in SERVICOS.items():
-    if dados["ativo"] and dados["mostrar_cliente"]:
-        opcoes_servicos.append(nome)
-
-servicos_escolhidos = st.multiselect(
-    "Você pode selecionar mais de uma opção",
-    opcoes_servicos,
-)
-
-if possui_ar == "Não, quero comprar":
-    quer_instalacao_compra = st.checkbox(
-        "Quero orçamento do aparelho + instalação"
-    )
-else:
-    quer_instalacao_compra = False
-
-# =========================================================
-# 3 - LOCAL
-# =========================================================
-
-st.markdown("### 3. Como é o local?")
-
-tipo_local = st.selectbox(
-    "Tipo de imóvel",
-    [
-        "Casa",
-        "Apartamento",
-        "Comércio",
-        "Outro",
-    ],
-)
-
-tamanho_ambiente = st.text_input(
-    "Tamanho aproximado do ambiente (opcional)",
-    placeholder="Ex.: 20 m² ou não sei",
-)
-
-st.caption(
-    "Essa informação pode nos ajudar a verificar se a "
-    "capacidade do aparelho é adequada para o ambiente."
-)
-
-# =========================================================
-# 4 - SITUAÇÕES DIFERENTES
-# =========================================================
-
-st.markdown("### 4. Existe alguma situação diferente?")
-
-st.caption(
-    "Marque somente o que você souber. "
-    "Se não souber, pode deixar em branco."
-)
-
-adicionais_escolhidos = []
-
-for adicional, dados in ADICIONAIS.items():
-
-    if not dados["mostrar_cliente"]:
-        continue
-
-    # Apartamento já foi informado acima.
-    if adicional == "Apartamento":
-        continue
-
-    marcado = st.checkbox(
-        adicional,
-        help=dados["descricao"],
+    area = st.selectbox(
+        "Tamanho aproximado do ambiente",
+        [
+            "Não sei",
+            "Até 10 m²",
+            "11 a 15 m²",
+            "16 a 20 m²",
+            "21 a 30 m²",
+            "Mais de 30 m²"
+        ]
     )
 
-    if marcado:
-        adicionais_escolhidos.append(adicional)
+    st.markdown("### Sobre o local")
 
-# =========================================================
-# 5 - OBSERVAÇÕES
-# =========================================================
+    situacoes = []
 
-st.markdown("### 5. Quer nos contar mais alguma coisa?")
+    for nome, dados in config["adicionais"].items():
 
-observacoes = st.text_area(
-    "Observações",
-    placeholder=(
-        "Ex.: local alto, instalação antiga, "
-        "não sei onde ficará a parte externa..."
-    ),
-    label_visibility="collapsed",
-)
+        if dados.get(
+            "mostrar_cliente",
+            True
+        ):
 
-# =========================================================
-# DADOS CLIENTE
-# =========================================================
+            if st.checkbox(
+                nome,
+                key=f"cliente_{nome}"
+            ):
+                situacoes.append(nome)
 
-st.markdown("### Seus dados")
+    observacoes = st.text_area(
+        "Observações",
+        placeholder=(
+            "Conte aqui qualquer detalhe "
+            "que possa ajudar no orçamento."
+        )
+    )
 
-nome = st.text_input(
-    "Nome",
-    placeholder="Seu nome",
-)
+    st.markdown("### Seus dados")
 
-telefone = st.text_input(
-    "WhatsApp",
-    placeholder="(00) 00000-0000",
-)
+    nome_cliente = st.text_input(
+        "Nome"
+    )
 
-cidade = st.text_input(
-    "Cidade",
-    placeholder="Sua cidade",
-)
+    telefone = st.text_input(
+        "Telefone / WhatsApp"
+    )
 
-bairro = st.text_input(
-    "Bairro",
-    placeholder="Seu bairro (opcional)",
-)
+    cidade = st.text_input(
+        "Cidade"
+    )
 
-# =========================================================
-# CALCULAR PREÇO BASE
-# =========================================================
+    total = 0.0
+    tem_valor = False
 
-total_base = 0.0
-itens_calculados = []
-itens_avaliar = []
+    if capacidade != "Não sei":
 
-for servico in servicos_escolhidos:
+        for servico in servicos:
 
-    dados = SERVICOS[servico]
+            valor = float(
+                config["servicos"][servico][
+                    "precos"
+                ].get(
+                    capacidade,
+                    0
+                )
+            )
 
-    if capacidade in dados["precos"]:
+            if valor > 0:
+                total += valor
+                tem_valor = True
 
-        valor = dados["precos"][capacidade]
-        total_base += valor
+    for adicional in situacoes:
 
-        itens_calculados.append(
-            f"{servico} - {capacidade}: {moeda(valor)}"
+        valor = float(
+            config["adicionais"][
+                adicional
+            ].get(
+                "preco",
+                0
+            )
         )
 
-    else:
+        if valor > 0:
+            total += valor
+            tem_valor = True
 
-        itens_avaliar.append(
-            f"{servico}: valor a confirmar"
-        )
+    aparelho_escolhido = None
 
-# =========================================================
-# BOTÃO ORÇAMENTO
-# =========================================================
+    if possui == "Não, quero comprar":
 
-st.divider()
+        st.markdown("### Aparelhos disponíveis")
 
-if st.button(
-    "Ver meu orçamento",
-    type="primary",
-    use_container_width=True,
-):
+        equipamentos_ativos = [
+            nome
+            for nome, dados
+            in config["equipamentos"].items()
+            if dados.get("ativo", False)
+        ]
 
-    if not nome.strip():
-        st.error("Informe seu nome.")
+        if equipamentos_ativos:
 
-    elif not telefone.strip():
-        st.error("Informe seu WhatsApp.")
+            aparelho_escolhido = st.selectbox(
+                "Escolha o aparelho",
+                equipamentos_ativos
+            )
 
-    elif not cidade.strip():
-        st.error("Informe sua cidade.")
+            preco_aparelho = float(
+                config["equipamentos"][
+                    aparelho_escolhido
+                ].get(
+                    "preco",
+                    0
+                )
+            )
 
-    elif (
-        not servicos_escolhidos
-        and possui_ar != "Não, quero comprar"
-    ):
-        st.error("Selecione pelo menos um serviço.")
+            if preco_aparelho > 0:
+                total += preco_aparelho
+                tem_valor = True
 
-    else:
+        else:
+            st.info(
+                "Consulte a F Climatização "
+                "sobre aparelhos disponíveis."
+            )
 
-        st.session_state.mostrar_orcamento = True
-
-        if "numero_orcamento" not in st.session_state:
-            st.session_state.numero_orcamento = numero_orcamento()
-
-# =========================================================
-# RESULTADO
-# =========================================================
-
-if st.session_state.get("mostrar_orcamento"):
-
-    numero = st.session_state.numero_orcamento
-
-    st.markdown(
-        '<div class="titulo">Seu orçamento</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(f"Orçamento #{numero}")
-
-    st.markdown(
-        '<div class="resumo">',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f"**Cliente:** {nome}")
-
-    st.markdown(
-        f"**Aparelho:** {capacidade}"
-    )
-
-    st.markdown(
-        f"**Local:** {tipo_local}"
-    )
-
-    if tamanho_ambiente:
-        st.markdown(
-            f"**Ambiente:** {tamanho_ambiente}"
-        )
-
-    st.markdown("**Serviços:**")
-
-    if itens_calculados:
-        for item in itens_calculados:
-            st.write(f"• {item}")
-
-    if itens_avaliar:
-        for item in itens_avaliar:
-            st.write(f"• {item}")
-
-    if possui_ar == "Não, quero comprar":
-
-        st.write("• Aparelho: preço a confirmar")
-
-        if quer_instalacao_compra:
-            st.write("• Instalação solicitada")
-
-    if adicionais_escolhidos:
-
-        st.markdown("**Informações adicionais:**")
-
-        for item in adicionais_escolhidos:
-            st.write(f"• {item}")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if total_base > 0:
-
-        st.markdown(
-            '<div class="total-label">VALOR BASE ESTIMADO</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f'<div class="total">{moeda(total_base)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    else:
-
-        st.info(
-            "O valor será confirmado pela F Climatização "
-            "após analisar as informações."
-        )
-
-    # =====================================================
-    # AVISO IMPORTANTE
-    # =====================================================
-
-    st.markdown(
-        """
-<div class="aviso">
-
-<b>Sobre a instalação</b><br><br>
-
-O valor apresentado considera uma instalação em
-condições normais.<br><br>
-
-Caso o local necessite de material adicional,
-tubulação extra, adequação, reparo ou algum serviço
-não previsto, a F Climatização informará você antes
-e combinará o valor adicional.<br><br>
-
-<b>Nenhum adicional será realizado sem combinar antes.</b>
-
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "📸 Para confirmar o orçamento, envie pelo WhatsApp "
-        "fotos do local onde ficará a parte interna e a parte "
-        "externa do ar-condicionado. Se possível, envie também "
-        "uma foto da etiqueta/modelo do aparelho."
-    )
-
-    # =====================================================
-    # WHATSAPP
-    # =====================================================
-
-    lista_servicos = (
-        ", ".join(servicos_escolhidos)
-        if servicos_escolhidos
-        else "A confirmar"
-    )
-
-    lista_adicionais = (
-        ", ".join(adicionais_escolhidos)
-        if adicionais_escolhidos
-        else "Nenhuma informada"
-    )
-
-    mensagem = f"""
-Olá! Meu nome é {nome}.
-
-Fiz o orçamento #{numero} pelo site da F Climatização.
-
-APARELHO
-Situação: {possui_ar}
-Capacidade: {capacidade}
-
-SERVIÇOS
-{lista_servicos}
-
-LOCAL
-Tipo: {tipo_local}
-Cidade: {cidade}
-Bairro: {bairro if bairro else "Não informado"}
-Tamanho aproximado: {tamanho_ambiente if tamanho_ambiente else "Não informado"}
-
-SITUAÇÕES INFORMADAS
-{lista_adicionais}
-
-OBSERVAÇÕES
-{observacoes if observacoes else "Nenhuma observação."}
-
-VALOR BASE ESTIMADO
-{moeda(total_base) if total_base > 0 else "A confirmar"}
-
-Gostaria de confirmar o orçamento e enviar as fotos do local.
-"""
-
-    link_whatsapp = (
-        f"https://wa.me/{EMPRESA['whatsapp']}"
-        f"?text={quote(mensagem)}"
-    )
-
-    st.link_button(
-        "📲 Enviar orçamento e fotos pelo WhatsApp",
-        link_whatsapp,
-        use_container_width=True,
-    )
+    st.divider()
 
     if st.button(
-        "Começar outro orçamento",
-        use_container_width=True,
+        "Calcular orçamento",
+        type="primary",
+        use_container_width=True
     ):
-        limpar_orcamento()
-        st.rerun()
 
-# =========================================================
-# RODAPÉ / ADMIN
-# =========================================================
+        if not servicos:
+            st.warning(
+                "Selecione pelo menos um serviço."
+            )
 
-st.divider()
+        else:
 
-with st.expander("Área da F Climatização"):
-    st.markdown(
-        "[🔐 Abrir administrador](?modo=admin)"
+            st.subheader("Resumo do orçamento")
+
+            for servico in servicos:
+
+                st.write(
+                    f"• {servico}"
+                )
+
+            if aparelho_escolhido:
+                st.write(
+                    f"• {aparelho_escolhido}"
+                )
+
+            if tem_valor:
+                st.metric(
+                    "Estimativa inicial",
+                    dinheiro(total)
+                )
+            else:
+                st.info(
+                    "O valor será confirmado pela "
+                    "F Climatização após avaliar "
+                    "as informações do serviço."
+                )
+
+            st.warning(
+                "A estimativa considera as condições "
+                "informadas. Caso sejam necessários "
+                "materiais adicionais, tubulação extra, "
+                "adequações elétricas, reparos ou trabalho "
+                "especial, o valor será informado antes. "
+                "Nada será acrescentado sem sua aprovação."
+            )
+
+            mensagem = (
+                f"Olá! Gostaria de solicitar um orçamento "
+                f"com a {empresa['nome']}.\n\n"
+                f"Nome: {nome_cliente}\n"
+                f"Telefone: {telefone}\n"
+                f"Cidade: {cidade}\n"
+                f"Aparelho: {possui}\n"
+                f"Capacidade: {capacidade}\n"
+                f"Serviços: {', '.join(servicos)}\n"
+                f"Imóvel: {tipo_imovel}\n"
+                f"Ambiente: {area}\n"
+            )
+
+            if situacoes:
+                mensagem += (
+                    "Situações informadas: "
+                    + ", ".join(situacoes)
+                    + "\n"
+                )
+
+            if aparelho_escolhido:
+                mensagem += (
+                    f"Aparelho escolhido: "
+                    f"{aparelho_escolhido}\n"
+                )
+
+            if observacoes:
+                mensagem += (
+                    f"Observações: {observacoes}\n"
+                )
+
+            if tem_valor:
+                mensagem += (
+                    f"\nEstimativa inicial: "
+                    f"{dinheiro(total)}"
+                )
+
+            st.link_button(
+                "📲 Enviar pelo WhatsApp",
+                link_whatsapp(mensagem),
+                use_container_width=True
+            )
+
+            st.info(
+                "📷 Para agilizar o orçamento, envie pelo "
+                "WhatsApp fotos do local da evaporadora e "
+                "da condensadora e, se possível, uma foto "
+                "da etiqueta/modelo do aparelho."
+            )
+
+    st.markdown("### Observações importantes")
+
+    st.caption(
+        "Serviços, materiais ou condições que não estejam "
+        "listados podem ser adicionados ao orçamento após "
+        "avaliação e aprovação do cliente."
     )
 
-st.caption(
-    "F Climatização • Orçamento rápido e sem compromisso"
-)
+
+# =========================================================
+# ROTEAMENTO
+# =========================================================
+
+modo = st.query_params.get("modo", "")
+
+if modo == "admin":
+    pagina_admin()
+else:
+    pagina_cliente()
