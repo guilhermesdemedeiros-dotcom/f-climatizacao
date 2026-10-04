@@ -4,19 +4,19 @@ import base64
 import urllib.request
 import urllib.error
 from urllib.parse import quote
-from datetime import datetime
 from io import BytesIO
+from datetime import datetime
 import os
 import copy
+import uuid
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image as RLImage, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 )
 
 # =========================================================
@@ -25,289 +25,178 @@ from reportlab.platypus import (
 
 st.set_page_config(
     page_title="F Climatização",
-    page_icon="logo_transparente.png" if os.path.exists("logo_transparente.png") else "logo.PNG" if os.path.exists("logo.PNG") else None,
+    page_icon="F",
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
 # =========================================================
-# IDENTIDADE VISUAL
+# CONSTANTES
+# =========================================================
+
+OWNER = "guilhermesdemedeiros-dotcom"
+CONFIG_REPO = "f-climatizacao"
+DATA_REPO = st.secrets.get("DATA_GITHUB_REPO", "f-climatizacao-dados")
+BRANCH = "main"
+
+CONFIG_FILE = "config.json"
+BUDGETS_FILE = "orcamentos.json"
+
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
+
+CAPACIDADES = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
+TIPOS_AR = ["Inverter", "Convencional"]
+UNIDADES_ITEM = ["unidade", "metro", "serviço", "equipamento"]
+
+# =========================================================
+# VISUAL
 # =========================================================
 
 st.markdown(
     """
 <style>
-:root {
-    --f-bg: #06080C;
-    --f-bg-2: #0A0E15;
-    --f-card: #0E141E;
-    --f-card-2: #121B29;
-    --f-blue-dark: #062B63;
-    --f-blue: #0878E8;
-    --f-blue-light: #20A4FF;
-    --f-orange: #FF7A00;
-    --f-orange-light: #FFA025;
-    --f-white: #FFFFFF;
-    --f-muted: #9EACBE;
-    --f-border: #243349;
+:root{
+  --bg:#07090d;
+  --card:#0e141e;
+  --card2:#111a27;
+  --border:#26354a;
+  --blue:#0878e8;
+  --blue2:#0f9fff;
+  --navy:#05275d;
+  --orange:#ff7a00;
+  --white:#ffffff;
+  --muted:#9caec4;
 }
-
-html, body, [class*="css"] {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+html,body,[class*="css"]{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
-
-.stApp {
-    background:
-        radial-gradient(circle at top right, rgba(8,120,232,.16), transparent 28%),
-        radial-gradient(circle at top left, rgba(255,122,0,.07), transparent 22%),
-        linear-gradient(180deg, #06080C 0%, #090D14 52%, #06080C 100%);
-    color: white;
+.stApp{
+  background:
+    radial-gradient(circle at top right,rgba(8,120,232,.13),transparent 28%),
+    radial-gradient(circle at top left,rgba(255,122,0,.05),transparent 22%),
+    linear-gradient(180deg,#07090d 0%,#090d14 55%,#07090d 100%);
+  color:#fff;
 }
-
-#MainMenu { visibility: hidden; }
-footer { visibility: hidden; }
-header[data-testid="stHeader"] { background: transparent; }
-
-.block-container {
-    max-width: 780px;
-    padding-top: .75rem;
-    padding-bottom: 4rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
+#MainMenu, footer{visibility:hidden;}
+header[data-testid="stHeader"]{background:transparent;}
+.block-container{
+  max-width:780px;
+  padding-top:.8rem;
+  padding-left:1rem;
+  padding-right:1rem;
+  padding-bottom:4rem;
 }
-
-h1, h2, h3, h4, h5, h6, p, label,
-[data-testid="stMarkdownContainer"] {
-    color: #FFFFFF;
+h1,h2,h3,h4,h5,h6,p,label,span{color:#fff;}
+div[data-testid="stCaptionContainer"] p{color:var(--muted)!important;}
+.brand-shell{
+  display:flex;
+  align-items:center;
+  gap:13px;
+  background:linear-gradient(135deg,#05275d 0%,#0878e8 120%);
+  border:1px solid rgba(35,160,255,.35);
+  border-radius:21px;
+  padding:13px 16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.28);
+  margin-bottom:10px;
 }
-
-/* CABEÇALHO */
-.brand-shell {
-    background: linear-gradient(135deg, rgba(5,17,35,.98), rgba(6,43,99,.96) 58%, rgba(8,120,232,.92));
-    border: 1px solid rgba(32,164,255,.34);
-    border-radius: 22px;
-    padding: 13px 15px;
-    box-shadow: 0 15px 36px rgba(0,0,0,.30);
-    overflow: hidden;
+.brand-logo{
+  width:60px;height:60px;object-fit:contain;flex:0 0 60px;
 }
-.brand-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
+.brand-name{font-size:21px;font-weight:900;line-height:1.05;color:#fff;}
+.brand-sub{font-size:12.5px;color:#d4e5fa;margin-top:5px;}
+.brand-admin{font-size:11px;color:#ff9a25;font-weight:800;letter-spacing:.8px;margin-bottom:3px;}
+.quick-row{
+  display:flex;gap:10px;flex-wrap:wrap;margin:7px 0 15px 0;
 }
-.brand-logo {
-    width: 52px;
-    height: 52px;
-    object-fit: contain;
-    flex: 0 0 52px;
+.quick-chip{
+  display:inline-flex;align-items:center;gap:7px;
+  border:1px solid #26354a;background:#0e141e;
+  color:#cbd8e9!important;text-decoration:none!important;
+  border-radius:999px;padding:8px 12px;font-size:12px;font-weight:650;
 }
-.brand-copy { min-width: 0; }
-.brand-title {
-    color: #FFFFFF;
-    font-weight: 950;
-    font-size: 21px;
-    line-height: 1.05;
-    letter-spacing: .15px;
+.quick-chip:hover{border-color:#0878e8;}
+.section-wrap{margin-top:25px;margin-bottom:11px;}
+.section-title{font-size:20px;font-weight:900;color:#fff;line-height:1.2;}
+.section-sub{font-size:13px;color:#91a3b9;margin-top:4px;line-height:1.4;}
+.info-card{
+  background:linear-gradient(135deg,rgba(8,120,232,.17),rgba(14,20,30,.98));
+  border:1px solid rgba(8,120,232,.4);
+  border-left:4px solid #0878e8;
+  border-radius:17px;padding:15px;margin:12px 0;
 }
-.brand-title .accent { color: #FF8A00; }
-.brand-subtitle {
-    color: #D4E7FF;
-    font-size: 12px;
-    margin-top: 5px;
-    font-weight: 600;
+.orange-card{
+  background:linear-gradient(135deg,rgba(255,122,0,.10),rgba(14,20,30,.98));
+  border:1px solid rgba(255,122,0,.32);
+  border-left:4px solid #ff7a00;
+  border-radius:17px;padding:15px;margin:12px 0;
 }
-.brand-kicker {
-    color: #FF9B1A;
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: .8px;
-    margin-bottom: 4px;
+.card-title{font-weight:850;font-size:15px;color:#fff;margin-bottom:4px;}
+.card-text{font-size:13px;color:#9caec4;line-height:1.5;}
+div[data-testid="stWidgetLabel"] p{color:#fff!important;font-weight:650!important;}
+div[data-testid="stRadio"]{
+  background:#0e141e;border:1px solid #26354a;border-radius:16px;padding:11px 13px;
 }
-.quick-strip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 8px 2px 2px;
+div[data-testid="stCheckbox"]{
+  background:#0e141e;border:1px solid #223147;border-radius:12px;padding:6px 9px;margin-bottom:5px;
 }
-.service-area {
-    color: #94A8C0;
-    font-size: 11.5px;
-    font-weight: 650;
-}
-.quick-whatsapp {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    text-decoration: none !important;
-    color: #D9FFE9 !important;
-    background: rgba(13,174,101,.10);
-    border: 1px solid rgba(21,201,122,.30);
-    border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 11.5px;
-    font-weight: 800;
-}
-.quick-whatsapp:hover {
-    background: rgba(13,174,101,.17);
-    color: #FFFFFF !important;
-}
-
-/* SEÇÕES */
-.section-wrap { margin-top: 26px; margin-bottom: 11px; }
-.section-title {
-    color: #FFFFFF;
-    font-size: 20px;
-    font-weight: 900;
-    line-height: 1.2;
-}
-.section-title .accent { color: #FF7A00; }
-.section-subtitle {
-    color: #8FA1B7;
-    font-size: 13px;
-    margin-top: 4px;
-    line-height: 1.45;
-}
-
-/* CARDS */
-.f-card,
-.f-card-blue,
-.f-card-orange {
-    border-radius: 18px;
-    padding: 15px 16px;
-    margin: 13px 0;
-}
-.f-card {
-    background: linear-gradient(180deg, #101722, #0D131C);
-    border: 1px solid #243247;
-}
-.f-card-blue {
-    background: linear-gradient(135deg, rgba(8,120,232,.15), rgba(14,19,28,.97));
-    border: 1px solid rgba(8,120,232,.42);
-    border-left: 4px solid #0878E8;
-}
-.f-card-orange {
-    background: linear-gradient(135deg, rgba(255,122,0,.12), rgba(14,19,28,.97));
-    border: 1px solid rgba(255,122,0,.34);
-    border-left: 4px solid #FF7A00;
-}
-.f-card-title { color: white; font-weight: 900; font-size: 16px; }
-.f-card-text { color: #AAB6C8; font-size: 13px; line-height: 1.5; margin-top: 4px; }
-
-/* INPUTS */
-div[data-testid="stWidgetLabel"] p { color: #FFFFFF !important; font-weight: 650 !important; }
-div[data-testid="stRadio"],
-div[data-testid="stCheckbox"] {
-    background: #0D131C;
-    border: 1px solid #202D3E;
-    border-radius: 13px;
-    padding: 9px 11px;
-}
-div[data-testid="stCheckbox"] { margin-bottom: 5px; }
-
-div[data-baseweb="select"] > div,
-div[data-baseweb="input"] > div,
+div[data-baseweb="select"]>div,
+div[data-baseweb="input"]>div,
 div[data-testid="stTextInput"] input,
 div[data-testid="stNumberInput"] input,
-textarea {
-    background: #111722 !important;
-    border-color: #2A3A51 !important;
-    border-radius: 13px !important;
-    color: #FFFFFF !important;
+textarea{
+  background:#111824!important;
+  border-color:#2b3a50!important;
+  border-radius:13px!important;
+  color:#fff!important;
 }
-input, textarea { color: #FFFFFF !important; caret-color: #FF7A00 !important; }
-input::placeholder, textarea::placeholder { color: #718198 !important; }
-div[data-baseweb="select"] span { color: #FFFFFF !important; }
-ul[role="listbox"] { background: #111722 !important; }
-li[role="option"] { color: white !important; }
-div[data-baseweb="tag"] { background: #0878E8 !important; }
-
-/* BOTÕES */
-.stButton > button {
-    width: 100%;
-    min-height: 49px;
-    border-radius: 14px;
-    font-weight: 850;
-    background: #111722;
-    color: #FFFFFF;
-    border: 1px solid #2A3A51;
+input,textarea{color:#fff!important;caret-color:#ff7a00!important;}
+input::placeholder,textarea::placeholder{color:#6f8197!important;}
+ul[role="listbox"]{background:#111824!important;}
+li[role="option"]{color:#fff!important;}
+div[data-baseweb="tag"]{background:#0878e8!important;}
+.stButton>button{
+  width:100%;min-height:48px;border-radius:14px;font-weight:800;
+  background:#111824;color:#fff;border:1px solid #2b3a50;
 }
-.stButton > button:hover { border-color: #0878E8; color: #FFFFFF; }
-.stButton > button[kind="primary"] {
-    background: linear-gradient(90deg, #0754AE, #0878E8);
-    border: 1px solid #188EFC;
-    color: white;
-    box-shadow: 0 8px 20px rgba(8,120,232,.22);
+.stButton>button:hover{border-color:#0878e8;color:#fff;}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(90deg,#0758b9,#0878e8);
+  border:1px solid #1891ff;color:#fff;
+  box-shadow:0 8px 19px rgba(8,120,232,.20);
 }
-.stLinkButton > a {
-    background: linear-gradient(90deg, #0DAE65, #15C97A) !important;
-    color: white !important;
-    border: 0 !important;
-    border-radius: 14px !important;
-    min-height: 50px !important;
-    font-weight: 850 !important;
+.stLinkButton>a{
+  border-radius:14px!important;min-height:48px!important;font-weight:800!important;
 }
-
-/* TABS / EXPANDERS / MÉTRICAS */
-div[data-testid="stExpander"] {
-    background: #0D131C;
-    border: 1px solid #243247;
-    border-radius: 15px;
-    overflow: hidden;
+div[data-testid="stMetric"]{
+  background:linear-gradient(135deg,rgba(8,120,232,.16),#0e141e);
+  border:1px solid rgba(8,120,232,.38);border-radius:17px;padding:15px;
 }
-div[data-testid="stMetric"] {
-    background: linear-gradient(135deg, rgba(8,120,232,.18), rgba(14,19,28,.96));
-    border: 1px solid rgba(8,120,232,.45);
-    border-radius: 18px;
-    padding: 16px;
+div[data-testid="stExpander"]{
+  background:#0e141e;border:1px solid #26354a;border-radius:14px;overflow:hidden;
 }
-button[data-baseweb="tab"] { color: #9AAABD !important; font-weight: 750; }
-button[data-baseweb="tab"][aria-selected="true"] { color: #FFFFFF !important; }
-div[data-baseweb="tab-highlight"] { background-color: #FF7A00 !important; }
-
-/* RODAPÉ */
-.f-footer {
-    margin-top: 34px;
-    border-top: 1px solid #1D2A3C;
-    padding: 20px 5px 0;
-    text-align: center;
+button[data-baseweb="tab"]{font-weight:750;color:#9aabc0!important;}
+button[data-baseweb="tab"][aria-selected="true"]{color:#fff!important;}
+div[data-baseweb="tab-highlight"]{background:#ff7a00!important;}
+hr{border-color:#243147!important;}
+.footer-box{
+  margin-top:34px;padding-top:18px;border-top:1px solid #202c3d;text-align:center;
+  color:#72849a;font-size:11px;
 }
-.f-footer-name { color: white; font-size: 14px; font-weight: 900; letter-spacing: .8px; }
-.f-footer-sub { color: #74859A; font-size: 11px; margin-top: 4px; }
-
-@media (max-width: 600px) {
-    .block-container { padding-left: .85rem; padding-right: .85rem; }
-    .brand-title { font-size: 18px; }
-    .brand-subtitle { font-size: 11.5px; }
-    .brand-logo { width: 46px; height: 46px; flex-basis: 46px; }
-    .quick-strip { padding-top: 7px; }
-    .section-title { font-size: 18px; }
+.budget-number{
+  display:inline-block;background:#ff7a00;color:#fff;font-weight:900;
+  padding:5px 10px;border-radius:999px;font-size:12px;margin-bottom:8px;
+}
+@media(max-width:600px){
+  .block-container{padding-left:.85rem;padding-right:.85rem;}
+  .brand-logo{width:48px;height:48px;flex-basis:48px;}
+  .brand-name{font-size:18px;}
+  .section-title{font-size:18px;}
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
-
-# =========================================================
-# GITHUB / SECRETS
-# =========================================================
-
-GITHUB_OWNER = "guilhermesdemedeiros-dotcom"
-GITHUB_REPO = "f-climatizacao"
-GITHUB_BRANCH = "main"
-CONFIG_FILE = "config.json"
-
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
-
-# Histórico privado de orçamentos.
-# Para persistência real, crie um repositório PRIVADO e adicione nos Secrets:
-# DATA_GITHUB_REPO = "f-climatizacao-dados"
-# O GITHUB_TOKEN também precisa ter Contents Read/Write nesse repositório privado.
-DATA_GITHUB_REPO = st.secrets.get("DATA_GITHUB_REPO", "")
-DATA_FILE = "orcamentos.json"
 
 # =========================================================
 # CONFIGURAÇÃO PADRÃO
@@ -316,85 +205,164 @@ DATA_FILE = "orcamentos.json"
 DEFAULT_CONFIG = {
     "empresa": {
         "nome": "F Climatização",
-        "slogan": "Conforto em todas as estações",
+        "slogan": "Seu ambiente na temperatura ideal",
         "whatsapp": "5555999999999",
-        "cidade_base": "Não-Me-Toque/RS",
-        "regiao_texto": "Atendimento em Não-Me-Toque e região",
-    },
-    "regras": {
-        "adicional_apartamento_2_piso_ou_mais": 0.0,
-        "texto_preco_equipamento": (
-            "O valor do equipamento é uma estimativa aproximada e pode variar conforme "
-            "a disponibilidade e a cotação do fornecedor no dia. O valor final será "
-            "confirmado pela F Climatização antes do fechamento do orçamento."
-        ),
-        "texto_estimativa": (
-            "Este orçamento é uma estimativa inicial. O valor final pode variar conforme "
-            "as condições reais do local, acesso, altura, materiais adicionais e necessidades "
-            "identificadas na avaliação. Qualquer alteração será informada antes da execução."
-        ),
+        "local_atendimento": "Não-Me-Toque/RS",
+        "texto_atendimento": "Atendimento em Não-Me-Toque e região",
     },
     "servicos": {
         "Instalação": {
             "ativo": True,
-            "descricao": "Instalação padrão de ar-condicionado Split.",
-            "precos": {"9.000 BTUs": 0.0, "12.000 BTUs": 0.0, "18.000 BTUs": 0.0, "24.000 BTUs": 0.0},
+            "mostrar_cliente": True,
+            "descricao": "Instalação de ar-condicionado até 2 metros de linha. Materiais são cobrados separadamente quando necessários.",
+            "precos": {
+                "9.000 BTUs": 280.0,
+                "12.000 BTUs": 280.0,
+                "18.000 BTUs": 350.0,
+                "24.000 BTUs": 400.0,
+            },
         },
-        "Higienização": {
+        "Carga de gás": {
             "ativo": True,
-            "descricao": "Limpeza e higienização do aparelho.",
-            "precos": {"9.000 BTUs": 0.0, "12.000 BTUs": 0.0, "18.000 BTUs": 0.0, "24.000 BTUs": 0.0},
-        },
-        "Manutenção": {
-            "ativo": True,
-            "descricao": "Avaliação e manutenção do equipamento.",
-            "precos": {"9.000 BTUs": 0.0, "12.000 BTUs": 0.0, "18.000 BTUs": 0.0, "24.000 BTUs": 0.0},
+            "mostrar_cliente": True,
+            "descricao": "Carga de gás refrigerante conforme capacidade do equipamento.",
+            "precos": {
+                "9.000 BTUs": 280.0,
+                "12.000 BTUs": 280.0,
+                "18.000 BTUs": 400.0,
+                "24.000 BTUs": 480.0,
+            },
         },
         "Desinstalação": {
             "ativo": True,
-            "descricao": "Retirada do aparelho instalado.",
-            "precos": {"9.000 BTUs": 0.0, "12.000 BTUs": 0.0, "18.000 BTUs": 0.0, "24.000 BTUs": 0.0},
+            "mostrar_cliente": True,
+            "descricao": "Desinstalação do equipamento.",
+            "precos": {
+                "9.000 BTUs": 120.0,
+                "12.000 BTUs": 120.0,
+                "18.000 BTUs": 160.0,
+                "24.000 BTUs": 200.0,
+            },
         },
-        "Reinstalação": {
+        "Higienização": {
             "ativo": True,
-            "descricao": "Reinstalação de aparelho já existente.",
-            "precos": {"9.000 BTUs": 0.0, "12.000 BTUs": 0.0, "18.000 BTUs": 0.0, "24.000 BTUs": 0.0},
+            "mostrar_cliente": True,
+            "descricao": "Limpeza e higienização do aparelho.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0,
+            },
+        },
+        "Manutenção": {
+            "ativo": True,
+            "mostrar_cliente": True,
+            "descricao": "Avaliação e manutenção do equipamento.",
+            "precos": {
+                "9.000 BTUs": 0.0,
+                "12.000 BTUs": 0.0,
+                "18.000 BTUs": 0.0,
+                "24.000 BTUs": 0.0,
+            },
         },
     },
     "materiais": {
-        'Tubo de cobre 1/4"': {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        'Tubo de cobre 3/8"': {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        'Tubo de cobre 1/2"': {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        'Tubo de cobre 5/8"': {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        'Tubo de cobre 3/4"': {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        "Canaleta": {"ativo": True, "mostrar_cliente": True, "unidade": "metro", "preco": 0.0},
-        "Cabo elétrico": {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        "Mangueira de dreno": {"ativo": True, "mostrar_cliente": False, "unidade": "metro", "preco": 0.0},
-        "Suporte para condensadora": {"ativo": True, "mostrar_cliente": True, "unidade": "unidade", "preco": 0.0},
+        'Tubo de cobre 1/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 3/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 1/2"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 5/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 3/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Canaleta": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Cabo elétrico": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Mangueira de dreno": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Suporte para condensadora": {"unidade": "unidade", "preco": 0.0, "ativo": True},
     },
     "equipamentos": {},
+    "regras": {
+        "adicional_apartamento_2_mais": 0.0,
+        "texto_variacao": "Esta é uma estimativa inicial. O valor final pode variar conforme materiais necessários, acesso, altura, condições do local e avaliação técnica.",
+        "texto_equipamento": "O valor do equipamento é uma referência aproximada e pode variar conforme disponibilidade e cotação do fornecedor no dia. O valor final será confirmado antes do fechamento.",
+    },
 }
 
 # =========================================================
-# CONFIG / MERGE
+# FUNÇÕES GERAIS
 # =========================================================
 
-def completar_config(base, padrao):
+def dinheiro(valor):
+    valor = float(valor or 0)
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def completar_dict(base, padrao):
     if not isinstance(base, dict):
         return copy.deepcopy(padrao)
-    resultado = copy.deepcopy(base)
-    for chave, valor in padrao.items():
-        if chave not in resultado:
-            resultado[chave] = copy.deepcopy(valor)
-        elif isinstance(valor, dict) and isinstance(resultado.get(chave), dict):
-            resultado[chave] = completar_config(resultado[chave], valor)
-    return resultado
+    out = copy.deepcopy(base)
+    for k, v in padrao.items():
+        if k not in out:
+            out[k] = copy.deepcopy(v)
+        elif isinstance(v, dict):
+            out[k] = completar_dict(out[k], v)
+    return out
+
+
+def migrar_config(dados):
+    dados = completar_dict(dados, DEFAULT_CONFIG)
+
+    # Reinstalação deixa de existir
+    dados.get("servicos", {}).pop("Reinstalação", None)
+
+    # Adicionais específicos antigos deixam de ser usados
+    dados.pop("adicionais", None)
+
+    # Valores-base novos só substituem zero/ausente
+    base_precos = DEFAULT_CONFIG["servicos"]
+    for servico in ["Instalação", "Carga de gás", "Desinstalação"]:
+        if servico not in dados["servicos"]:
+            dados["servicos"][servico] = copy.deepcopy(base_precos[servico])
+        else:
+            dados["servicos"][servico]["ativo"] = dados["servicos"][servico].get("ativo", True)
+            dados["servicos"][servico]["mostrar_cliente"] = dados["servicos"][servico].get("mostrar_cliente", True)
+            dados["servicos"][servico]["descricao"] = dados["servicos"][servico].get(
+                "descricao", base_precos[servico]["descricao"]
+            )
+            dados["servicos"][servico].setdefault("precos", {})
+            for cap, valor in base_precos[servico]["precos"].items():
+                atual = dados["servicos"][servico]["precos"].get(cap)
+                if atual in (None, 0, 0.0, ""):
+                    dados["servicos"][servico]["precos"][cap] = valor
+
+    # Migração de equipamentos antigos para estrutura nova
+    novos = {}
+    for chave, eq in dados.get("equipamentos", {}).items():
+        if not isinstance(eq, dict):
+            continue
+        eq2 = copy.deepcopy(eq)
+        eq2.setdefault("id", chave)
+        eq2.setdefault("marca", "")
+        eq2.setdefault("capacidade", "9.000 BTUs")
+        eq2.setdefault("tipo", "Inverter")
+        eq2.setdefault("preco", 0.0)
+        eq2.setdefault("ativo", False)
+
+        # tenta aproveitar capacidade do nome antigo
+        if "capacidade" not in eq or not eq.get("capacidade"):
+            for cap in CAPACIDADES:
+                if cap in chave:
+                    eq2["capacidade"] = cap
+                    break
+
+        novos[str(eq2["id"])] = eq2
+    dados["equipamentos"] = novos
+
+    return dados
 
 
 def carregar_config():
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
-            return completar_config(json.load(arquivo), DEFAULT_CONFIG)
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return migrar_config(json.load(f))
     except Exception:
         return copy.deepcopy(DEFAULT_CONFIG)
 
@@ -405,145 +373,128 @@ config = carregar_config()
 # GITHUB API
 # =========================================================
 
-def github_request(repo, caminho, method="GET", data=None):
+def github_request(url, method="GET", data=None):
     if not GITHUB_TOKEN:
-        raise Exception("GITHUB_TOKEN não encontrado nos Secrets.")
+        raise RuntimeError("GITHUB_TOKEN não configurado nos Secrets.")
 
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{repo}/contents/{caminho}"
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "F-Climatizacao",
     }
+
     body = None
     if data is not None:
         body = json.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=25) as response:
-        content = response.read().decode("utf-8")
-        return json.loads(content) if content else {}
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
-
-def github_ler_json(repo, caminho, default):
     try:
-        resposta = github_request(repo, caminho)
-        conteudo = base64.b64decode(resposta["content"]).decode("utf-8")
-        return json.loads(conteudo)
-    except urllib.error.HTTPError as erro:
-        if erro.code == 404:
-            return copy.deepcopy(default)
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            pass
+        raise RuntimeError(f"GitHub API {e.code}: {detail or e.reason}")
+
+
+def github_get_file(repo, path):
+    url = f"https://api.github.com/repos/{OWNER}/{repo}/contents/{quote(path)}?ref={quote(BRANCH)}"
+    try:
+        obj = github_request(url)
+        content = base64.b64decode(obj["content"]).decode("utf-8")
+        return content, obj.get("sha")
+    except RuntimeError as e:
+        if "GitHub API 404" in str(e):
+            return None, None
         raise
 
 
-def github_salvar_json(repo, caminho, dados, mensagem):
-    sha = None
-    try:
-        atual = github_request(repo, caminho)
-        sha = atual.get("sha")
-    except urllib.error.HTTPError as erro:
-        if erro.code != 404:
-            raise
-
-    conteudo = json.dumps(dados, ensure_ascii=False, indent=2)
+def github_put_file(repo, path, text_content, message, sha=None):
+    url = f"https://api.github.com/repos/{OWNER}/{repo}/contents/{quote(path)}"
     payload = {
-        "message": mensagem,
-        "content": base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": GITHUB_BRANCH,
+        "message": message,
+        "content": base64.b64encode(text_content.encode("utf-8")).decode("utf-8"),
+        "branch": BRANCH,
     }
     if sha:
         payload["sha"] = sha
-    return github_request(repo, caminho, method="PUT", data=payload)
+    return github_request(url, method="PUT", data=payload)
 
 
-def salvar_config_github(nova_config):
-    return github_salvar_json(
-        GITHUB_REPO,
+def salvar_config():
+    texto = json.dumps(config, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(CONFIG_REPO, CONFIG_FILE)
+    github_put_file(
+        CONFIG_REPO,
         CONFIG_FILE,
-        nova_config,
+        texto,
         "Atualiza configurações pelo painel ADM",
+        sha=sha,
     )
-
-# =========================================================
-# HISTÓRICO PRIVADO
-# =========================================================
-
-def armazenamento_privado_ok():
-    return bool(DATA_GITHUB_REPO and GITHUB_TOKEN)
 
 
 def carregar_orcamentos():
-    if not armazenamento_privado_ok():
-        return st.session_state.setdefault("orcamentos_temporarios", [])
     try:
-        return github_ler_json(DATA_GITHUB_REPO, DATA_FILE, [])
-    except Exception as erro:
-        st.warning(f"Não foi possível acessar o histórico privado: {erro}")
-        return st.session_state.setdefault("orcamentos_temporarios", [])
+        content, _ = github_get_file(DATA_REPO, BUDGETS_FILE)
+        if content is None:
+            return []
+        dados = json.loads(content)
+        return dados if isinstance(dados, list) else []
+    except Exception as e:
+        st.error(f"Não foi possível carregar os orçamentos: {e}")
+        return []
 
 
 def salvar_orcamentos(lista):
-    if not armazenamento_privado_ok():
-        st.session_state["orcamentos_temporarios"] = lista
-        return False
-    github_salvar_json(
-        DATA_GITHUB_REPO,
-        DATA_FILE,
-        lista,
+    texto = json.dumps(lista, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(DATA_REPO, BUDGETS_FILE)
+    github_put_file(
+        DATA_REPO,
+        BUDGETS_FILE,
+        texto,
         "Atualiza histórico de orçamentos",
+        sha=sha,
     )
-    return True
 
 
-def proximo_numero_orcamento(lista):
+def proximo_numero(lista):
     maior = 0
-    for item in lista:
+    for o in lista:
         try:
-            maior = max(maior, int(str(item.get("numero", "0"))))
+            maior = max(maior, int(str(o.get("numero", "0")).lstrip("0") or "0"))
         except Exception:
             pass
     return f"{maior + 1:04d}"
 
+
 # =========================================================
-# UTILIDADES
+# LOGO / CABEÇALHO
 # =========================================================
 
-def dinheiro(valor):
-    return f"R$ {float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def encontrar_logo():
-    for caminho in ["logo_transparente.png", "logo.PNG", "logo.png", "Logo.PNG", "Logo.png"]:
-        if os.path.exists(caminho):
-            return caminho
+def logo_path():
+    for nome in ["logo_transparente.png", "logo_transparente.PNG", "logo.png", "logo.PNG"]:
+        if os.path.exists(nome):
+            return nome
     return None
 
 
 def logo_data_uri():
-    caminho = encontrar_logo()
-    if not caminho:
+    path = logo_path()
+    if not path:
         return ""
     try:
-        with open(caminho, "rb") as arquivo:
-            conteudo = base64.b64encode(arquivo.read()).decode("ascii")
-        ext = os.path.splitext(caminho)[1].lower()
-        mime = "image/png" if ext == ".png" else "image/jpeg"
-        return f"data:{mime};base64,{conteudo}"
+        mime = "image/png"
+        data = base64.b64encode(open(path, "rb").read()).decode("ascii")
+        return f"data:{mime};base64,{data}"
     except Exception:
         return ""
-
-
-def nome_equipamento(dados):
-    marca = str(dados.get("marca", "")).strip()
-    capacidade = str(dados.get("capacidade", "")).strip() or "Capacidade não informada"
-    tipo = str(dados.get("tipo", "")).strip() or "Tipo não informado"
-    partes = ["Ar-condicionado"]
-    if marca:
-        partes.append(marca)
-    partes.extend([capacidade, tipo])
-    return " • ".join(partes)
 
 
 def link_whatsapp(texto):
@@ -551,404 +502,752 @@ def link_whatsapp(texto):
     return f"https://wa.me/{numero}?text={quote(texto)}"
 
 
-def titulo_secao(titulo, subtitulo=""):
-    st.markdown(
-        f'<div class="section-wrap"><div class="section-title">{titulo}</div>'
-        f'<div class="section-subtitle">{subtitulo}</div></div>',
-        unsafe_allow_html=True,
-    )
+def cabecalho(admin=False):
+    logo = logo_data_uri()
+    img = f'<img class="brand-logo" src="{logo}" alt="Logo F Climatização">' if logo else ""
 
-
-def cabecalho(area="cliente"):
-    logo_uri = logo_data_uri()
-    img = f'<img class="brand-logo" src="{logo_uri}" alt="Logo F Climatização">' if logo_uri else ""
-
-    if area == "admin":
-        html = (
-            '<div class="brand-shell">'
-            '<div class="brand-row">'
-            f'{img}'
-            '<div class="brand-copy">'
-            '<div class="brand-kicker">ADMINISTRAÇÃO</div>'
-            '<div class="brand-title">F <span class="accent">CLIMATIZAÇÃO</span></div>'
-            '<div class="brand-subtitle">Painel de gestão, preços e orçamentos</div>'
-            '</div></div></div>'
-        )
+    if admin:
+        corpo = """
+        <div>
+          <div class="brand-admin">ADMINISTRAÇÃO</div>
+          <div class="brand-name">F CLIMATIZAÇÃO</div>
+          <div class="brand-sub">Painel de gestão, preços e orçamentos</div>
+        </div>
+        """
     else:
         nome = config["empresa"].get("nome", "F Climatização").upper()
-        slogan = config["empresa"].get("slogan", "Conforto em todas as estações")
-        html = (
-            '<div class="brand-shell">'
-            '<div class="brand-row">'
-            f'{img}'
-            '<div class="brand-copy">'
-            f'<div class="brand-title">{nome}</div>'
-            f'<div class="brand-subtitle">{slogan}</div>'
-            '</div></div></div>'
-        )
+        slogan = config["empresa"].get("slogan", "Seu ambiente na temperatura ideal")
+        corpo = f"""
+        <div>
+          <div class="brand-name">{nome}</div>
+          <div class="brand-sub">{slogan}</div>
+        </div>
+        """
 
-    st.markdown(html, unsafe_allow_html=True)
-
-
-def faixa_atendimento_whatsapp():
-    cidade = config["empresa"].get("cidade_base", "Não-Me-Toque/RS")
-    regiao = config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região")
-    mensagem = quote("Olá! Gostaria de falar com a F Climatização para solicitar um orçamento.")
-    numero = "".join(c for c in config["empresa"].get("whatsapp", "") if c.isdigit())
-    href = f"https://wa.me/{numero}?text={mensagem}" if numero else "#"
     st.markdown(
-        f'<div class="quick-strip">'
-        f'<div class="service-area">📍 {regiao or cidade}</div>'
-        f'<a class="quick-whatsapp" href="{href}" target="_blank" rel="noopener noreferrer">WhatsApp</a>'
-        f'</div>',
+        f'<div class="brand-shell">{img}{corpo}</div>',
         unsafe_allow_html=True,
     )
 
+    if not admin:
+        wa = link_whatsapp("Olá! Gostaria de falar com a F Climatização.")
+        atendimento = config["empresa"].get(
+            "texto_atendimento", "Atendimento em Não-Me-Toque e região"
+        )
+        st.markdown(
+            f"""
+            <div class="quick-row">
+              <a class="quick-chip" href="{wa}" target="_blank">WhatsApp</a>
+              <span class="quick-chip">{atendimento}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def secao(titulo, subtitulo=""):
+    st.markdown(
+        f"""
+        <div class="section-wrap">
+          <div class="section-title">{titulo}</div>
+          <div class="section-sub">{subtitulo}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # =========================================================
-# PDF PROFISSIONAL
+# EQUIPAMENTOS
 # =========================================================
 
-def gerar_pdf_orcamento(orcamento):
+def nome_equipamento(eq):
+    marca = (eq.get("marca") or "").strip()
+    partes = ["Ar-condicionado"]
+    if marca:
+        partes.append(marca)
+    partes.append(eq.get("capacidade", ""))
+    partes.append(eq.get("tipo", ""))
+    return " • ".join([p for p in partes if p])
+
+
+# =========================================================
+# PDF
+# =========================================================
+
+def gerar_pdf(orcamento):
     buffer = BytesIO()
+
+    azul = colors.HexColor("#05275D")
+    azul2 = colors.HexColor("#0878E8")
+    laranja = colors.HexColor("#FF7A00")
+    cinza = colors.HexColor("#5F6B7A")
+    cinza_claro = colors.HexColor("#E8EDF3")
+
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=14 * mm,
-        leftMargin=14 * mm,
-        topMargin=13 * mm,
+        rightMargin=16 * mm,
+        leftMargin=16 * mm,
+        topMargin=14 * mm,
         bottomMargin=14 * mm,
     )
 
     styles = getSampleStyleSheet()
-    azul = colors.HexColor("#062B63")
-    azul_vivo = colors.HexColor("#0878E8")
-    laranja = colors.HexColor("#FF7A00")
-    grafite = colors.HexColor("#10141C")
-    cinza = colors.HexColor("#667085")
-
-    normal = ParagraphStyle(
-        "NormalF",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=9.2,
-        leading=13,
-        textColor=grafite,
+    title_style = ParagraphStyle(
+        "FTitulo",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=17,
+        leading=20,
+        textColor=azul,
+        spaceAfter=3,
     )
     small = ParagraphStyle(
-        "SmallF",
-        parent=normal,
-        fontSize=8,
+        "FSmall",
+        parent=styles["BodyText"],
+        fontSize=8.5,
         leading=11,
         textColor=cinza,
     )
-    title = ParagraphStyle(
-        "TitleF",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=21,
-        textColor=azul,
-        spaceAfter=2,
+    normal = ParagraphStyle(
+        "FNormal",
+        parent=styles["BodyText"],
+        fontSize=9.5,
+        leading=13,
+        textColor=colors.HexColor("#1A2430"),
     )
-    right = ParagraphStyle("RightF", parent=normal, alignment=TA_RIGHT)
-    center_small = ParagraphStyle("CenterSmall", parent=small, alignment=TA_CENTER)
+    right = ParagraphStyle(
+        "FRight",
+        parent=normal,
+        alignment=TA_RIGHT,
+    )
 
     story = []
-    logo = encontrar_logo()
+
+    logo = logo_path()
     logo_flow = ""
     if logo:
         try:
-            logo_flow = RLImage(logo, width=32 * mm, height=32 * mm)
+            logo_flow = Image(logo, width=25 * mm, height=25 * mm)
         except Exception:
             logo_flow = ""
 
-    empresa_nome = config["empresa"].get("nome", "F Climatização")
-    header_text = [
-        Paragraph(empresa_nome.upper(), title),
-        Paragraph(config["empresa"].get("slogan", "Conforto em todas as estações"), small),
+    empresa = config["empresa"]
+    cab_dados = [
+        [
+            logo_flow,
+            Paragraph(
+                f"<b>{empresa.get('nome','F Climatização')}</b><br/>"
+                f"<font size='8'>{empresa.get('slogan','')}</font><br/>"
+                f"<font size='8'>{empresa.get('texto_atendimento','')}</font>",
+                title_style,
+            ),
+            Paragraph(
+                f"<b>ORÇAMENTO Nº {orcamento['numero']}</b><br/>"
+                f"<font size='8'>Data: {orcamento.get('data','')}</font>",
+                right,
+            ),
+        ]
     ]
-    header_data = [[logo_flow, header_text, Paragraph(f"<b>ORÇAMENTO Nº {orcamento['numero']}</b><br/>{orcamento['data']}", right)]]
-    header = Table(header_data, colWidths=[36 * mm, 95 * mm, 45 * mm])
-    header.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LINEBELOW", (0, 0), (-1, -1), 1.5, laranja),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    story.append(header)
-    story.append(Spacer(1, 6 * mm))
+    cab = Table(cab_dados, colWidths=[28 * mm, 103 * mm, 43 * mm])
+    cab.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBELOW", (0, 0), (-1, -1), 1.2, laranja),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    story += [cab, Spacer(1, 7 * mm)]
 
     cliente = orcamento.get("cliente", {})
-    dados_cliente = [
-        [Paragraph("<b>CLIENTE</b>", normal), ""],
-        [Paragraph(f"<b>Nome:</b> {cliente.get('nome','-')}", normal), Paragraph(f"<b>Contato:</b> {cliente.get('telefone','-')}", normal)],
-        [Paragraph(f"<b>Cidade:</b> {cliente.get('cidade','-')}", normal), Paragraph(f"<b>Imóvel:</b> {orcamento.get('tipo_imovel','-')}", normal)],
-    ]
-    t_cliente = Table(dados_cliente, colWidths=[88 * mm, 88 * mm])
-    t_cliente.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EFF6FF")),
-        ("SPAN", (0, 0), (1, 0)),
-        ("BOX", (0, 0), (-1, -1), .6, colors.HexColor("#D7E2F0")),
-        ("INNERGRID", (0, 1), (-1, -1), .35, colors.HexColor("#E4EAF2")),
-        ("PADDING", (0, 0), (-1, -1), 7),
-    ]))
-    story.append(t_cliente)
-    story.append(Spacer(1, 5 * mm))
+    story.append(Paragraph("<b>Cliente</b>", title_style))
+    cliente_tbl = Table(
+        [
+            ["Nome", cliente.get("nome", "")],
+            ["Contato", cliente.get("telefone", "")],
+            ["Cidade", cliente.get("cidade", "")],
+            ["Imóvel", orcamento.get("tipo_imovel", "")],
+        ],
+        colWidths=[30 * mm, 144 * mm],
+    )
+    cliente_tbl.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TEXTCOLOR", (0, 0), (0, -1), azul),
+                ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F6F8FB")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("PADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story += [cliente_tbl, Spacer(1, 6 * mm)]
 
-    cabecalho_itens = ["Descrição", "Qtd.", "Unid.", "Valor unit.", "Total"]
-    linhas = [cabecalho_itens]
+    story.append(Paragraph("<b>Itens do orçamento</b>", title_style))
+    dados = [["Descrição", "Qtd.", "Unidade", "Valor unit.", "Total"]]
+
     for item in orcamento.get("itens", []):
-        linhas.append([
-            Paragraph(str(item.get("descricao", "")), normal),
-            f"{float(item.get('quantidade',1)):g}",
-            item.get("unidade", "serviço"),
-            dinheiro(item.get("valor_unitario", 0)),
-            dinheiro(item.get("total", 0)),
-        ])
+        qtd = float(item.get("quantidade", 0) or 0)
+        vu = float(item.get("valor_unitario", 0) or 0)
+        total = qtd * vu
+        dados.append(
+            [
+                Paragraph(str(item.get("descricao", "")), small),
+                f"{qtd:g}",
+                item.get("unidade", ""),
+                dinheiro(vu),
+                dinheiro(total),
+            ]
+        )
 
-    tabela = Table(linhas, colWidths=[76 * mm, 18 * mm, 24 * mm, 30 * mm, 30 * mm], repeatRows=1)
-    tabela.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), azul),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 8.5),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-        ("GRID", (0, 0), (-1, -1), .35, colors.HexColor("#D8E1EC")),
-        ("PADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(tabela)
-    story.append(Spacer(1, 5 * mm))
+    itens_tbl = Table(
+        dados,
+        colWidths=[78 * mm, 18 * mm, 24 * mm, 27 * mm, 27 * mm],
+        repeatRows=1,
+    )
+    itens_tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), azul),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFBFD")]),
+                ("PADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    story += [itens_tbl, Spacer(1, 5 * mm)]
 
-    total_table = Table([
-        [Paragraph("<b>TOTAL ESTIMADO</b>", normal), Paragraph(f"<b>{dinheiro(orcamento.get('total',0))}</b>", right)]
-    ], colWidths=[118 * mm, 60 * mm])
-    total_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E8")),
-        ("BOX", (0, 0), (-1, -1), 1, laranja),
-        ("PADDING", (0, 0), (-1, -1), 10),
-    ]))
-    story.append(total_table)
-    story.append(Spacer(1, 5 * mm))
+    total = sum(
+        float(i.get("quantidade", 0) or 0) * float(i.get("valor_unitario", 0) or 0)
+        for i in orcamento.get("itens", [])
+    )
+
+    total_tbl = Table(
+        [[Paragraph("<b>TOTAL ESTIMADO</b>", normal), Paragraph(f"<b>{dinheiro(total)}</b>", right)]],
+        colWidths=[120 * mm, 54 * mm],
+    )
+    total_tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E8")),
+                ("BOX", (0, 0), (-1, -1), 0.8, laranja),
+                ("PADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    story += [total_tbl, Spacer(1, 6 * mm)]
 
     obs = orcamento.get("observacoes", "")
-    adicional = orcamento.get("adicional_descricao", "")
-    blocos = []
-    if adicional:
-        blocos.append(Paragraph(f"<b>Adicional informado:</b> {adicional}", normal))
+    adicional = orcamento.get("adicional", {})
+    if adicional.get("solicitado"):
+        desc = adicional.get("descricao", "").strip()
+        if desc:
+            obs_extra = f"O cliente informou necessidade adicional: {desc}."
+        else:
+            obs_extra = (
+                "O cliente indicou possível necessidade de serviço ou material adicional. "
+                "O valor final poderá ser ajustado após avaliação técnica."
+            )
+        obs = (obs + "\n" + obs_extra).strip()
+
     if obs:
-        blocos.append(Paragraph(f"<b>Observações do cliente:</b> {obs}", normal))
-    if orcamento.get("tem_equipamento"):
-        blocos.append(Paragraph(config["regras"].get("texto_preco_equipamento", ""), small))
-    blocos.append(Paragraph(config["regras"].get("texto_estimativa", ""), small))
+        story += [
+            Paragraph("<b>Observações</b>", title_style),
+            Paragraph(obs.replace("\n", "<br/>"), normal),
+            Spacer(1, 4 * mm),
+        ]
 
-    if blocos:
-        bloco = Table([[blocos]], colWidths=[178 * mm])
-        bloco.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F6F8FB")),
-            ("BOX", (0, 0), (-1, -1), .6, colors.HexColor("#D8E1EC")),
-            ("PADDING", (0, 0), (-1, -1), 9),
-        ]))
-        story.append(bloco)
-
-    story.append(Spacer(1, 6 * mm))
-    story.append(Paragraph("F Climatização - orçamento sujeito à confirmação final antes da execução.", center_small))
+    cond = config["regras"].get("texto_variacao", "")
+    story += [
+        KeepTogether(
+            [
+                Paragraph("<b>Condições importantes</b>", title_style),
+                Paragraph(cond, normal),
+                Spacer(1, 2 * mm),
+                Paragraph(
+                    "Equipamentos para venda têm valor de referência sujeito à disponibilidade e à cotação do fornecedor no dia. "
+                    "O valor final é confirmado antes do fechamento.",
+                    normal,
+                ),
+            ]
+        )
+    ]
 
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
+
 # =========================================================
-# CÁLCULO DO ORÇAMENTO
+# ORÇAMENTO
 # =========================================================
 
-def calcular_itens_orcamento(servicos, capacidade, equipamento_key, metros_tubulacao, materiais_cliente, tipo_imovel, piso, adicional_sim, adicional_desc):
-    itens = []
-    tem_equipamento = False
+def calcular_total(itens):
+    return sum(
+        float(i.get("quantidade", 0) or 0) * float(i.get("valor_unitario", 0) or 0)
+        for i in itens
+    )
 
-    for servico in servicos:
-        valor = float(config["servicos"].get(servico, {}).get("precos", {}).get(capacidade, 0) or 0)
-        itens.append({
-            "descricao": servico,
-            "quantidade": 1.0,
-            "unidade": "serviço",
-            "valor_unitario": valor,
-            "total": valor,
-        })
 
-    if equipamento_key:
-        eq = config["equipamentos"].get(equipamento_key, {})
-        valor_eq = float(eq.get("preco", 0) or 0)
-        descricao = nome_equipamento(eq)
-        itens.append({
-            "descricao": descricao,
-            "quantidade": 1.0,
-            "unidade": "equipamento",
-            "valor_unitario": valor_eq,
-            "total": valor_eq,
-        })
-        tem_equipamento = True
+def montar_item(descricao, quantidade, unidade, valor_unitario, origem="manual"):
+    return {
+        "id": uuid.uuid4().hex[:10],
+        "descricao": descricao,
+        "quantidade": float(quantidade),
+        "unidade": unidade,
+        "valor_unitario": float(valor_unitario),
+        "origem": origem,
+    }
 
-        material_metro = eq.get("material_metro", "")
-        if material_metro and metros_tubulacao > 0:
-            mat = config["materiais"].get(material_metro, {})
-            if mat.get("ativo", False):
-                valor_m = float(mat.get("preco", 0) or 0)
-                itens.append({
-                    "descricao": material_metro,
-                    "quantidade": float(metros_tubulacao),
-                    "unidade": "metro",
-                    "valor_unitario": valor_m,
-                    "total": float(metros_tubulacao) * valor_m,
-                })
-
-    for nome, quantidade in materiais_cliente.items():
-        mat = config["materiais"].get(nome, {})
-        if not mat.get("ativo", False) or quantidade <= 0:
-            continue
-        valor = float(mat.get("preco", 0) or 0)
-        itens.append({
-            "descricao": nome,
-            "quantidade": float(quantidade),
-            "unidade": mat.get("unidade", "unidade"),
-            "valor_unitario": valor,
-            "total": float(quantidade) * valor,
-        })
-
-    if tipo_imovel == "Apartamento" and int(piso or 1) >= 2:
-        valor_ap = float(config["regras"].get("adicional_apartamento_2_piso_ou_mais", 0) or 0)
-        if valor_ap > 0:
-            itens.append({
-                "descricao": f"Adicional de acesso - apartamento a partir do 2º piso (piso informado: {int(piso)})",
-                "quantidade": 1.0,
-                "unidade": "serviço",
-                "valor_unitario": valor_ap,
-                "total": valor_ap,
-            })
-
-    if adicional_sim:
-        descricao = adicional_desc.strip() or "Adicional solicitado - sujeito a avaliação e possível alteração de valor"
-        itens.append({
-            "descricao": descricao,
-            "quantidade": 1.0,
-            "unidade": "avaliação",
-            "valor_unitario": 0.0,
-            "total": 0.0,
-        })
-
-    return itens, tem_equipamento
 
 # =========================================================
 # ADMIN - ORÇAMENTOS
 # =========================================================
 
-def admin_orcamentos():
-    titulo_secao("Orçamentos", "Histórico numerado, edição de itens e geração de PDF.")
+def aba_orcamentos():
+    secao("Orçamentos", "Histórico permanente de orçamentos gerados pelo cliente.")
 
-    if not armazenamento_privado_ok():
-        st.warning(
-            "O histórico está temporário nesta sessão porque o armazenamento privado ainda não foi configurado. "
-            "Não é seguro salvar dados pessoais no repositório público do aplicativo."
-        )
+    orcamentos = carregar_orcamentos()
 
-    lista = carregar_orcamentos()
-    if not lista:
-        st.info("Nenhum orçamento registrado ainda.")
+    if not orcamentos:
+        st.info("Nenhum orçamento salvo ainda.")
         return
 
-    opcoes = [f"{o.get('numero','----')} - {o.get('cliente',{}).get('nome','Cliente')} - {o.get('data','')}" for o in reversed(lista)]
-    escolha = st.selectbox("Abrir orçamento", opcoes)
-    indice_reverso = opcoes.index(escolha)
-    indice = len(lista) - 1 - indice_reverso
-    orc = copy.deepcopy(lista[indice])
+    busca = st.text_input("Buscar por número, cliente ou telefone", key="buscar_orcamentos").strip().lower()
 
-    st.markdown(f"### Orçamento #{orc.get('numero','----')}")
+    filtrados = []
+    for o in sorted(orcamentos, key=lambda x: str(x.get("numero", "")), reverse=True):
+        texto = " ".join(
+            [
+                str(o.get("numero", "")),
+                str(o.get("cliente", {}).get("nome", "")),
+                str(o.get("cliente", {}).get("telefone", "")),
+            ]
+        ).lower()
+        if not busca or busca in texto:
+            filtrados.append(o)
+
+    for o in filtrados:
+        numero = o.get("numero", "----")
+        nome = o.get("cliente", {}).get("nome", "Cliente")
+        total = calcular_total(o.get("itens", []))
+
+        with st.expander(f"Orçamento {numero} • {nome} • {dinheiro(total)}"):
+            st.markdown(f'<span class="budget-number">#{numero}</span>', unsafe_allow_html=True)
+            st.write(f"**Data:** {o.get('data','')}")
+            st.write(f"**Cliente:** {nome}")
+            st.write(f"**Contato:** {o.get('cliente',{}).get('telefone','')}")
+            st.write(f"**Cidade:** {o.get('cliente',{}).get('cidade','')}")
+
+            st.markdown("#### Itens")
+
+            itens_editados = []
+            excluir_ids = []
+
+            for idx, item in enumerate(o.get("itens", [])):
+                iid = item.get("id") or f"item{idx}"
+                with st.expander(item.get("descricao", f"Item {idx+1}")):
+                    desc = st.text_input(
+                        "Descrição",
+                        value=item.get("descricao", ""),
+                        key=f"orc_{numero}_{iid}_desc",
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        qtd = st.number_input(
+                            "Quantidade",
+                            min_value=0.0,
+                            value=float(item.get("quantidade", 1) or 0),
+                            step=1.0 if item.get("unidade") != "metro" else 0.5,
+                            key=f"orc_{numero}_{iid}_qtd",
+                        )
+                    with c2:
+                        unidade_atual = item.get("unidade", "unidade")
+                        if unidade_atual not in UNIDADES_ITEM:
+                            unidade_atual = "unidade"
+                        unidade = st.selectbox(
+                            "Unidade",
+                            UNIDADES_ITEM,
+                            index=UNIDADES_ITEM.index(unidade_atual),
+                            key=f"orc_{numero}_{iid}_un",
+                        )
+
+                    vu = st.number_input(
+                        "Valor unitário",
+                        min_value=0.0,
+                        value=float(item.get("valor_unitario", 0) or 0),
+                        step=1.0,
+                        key=f"orc_{numero}_{iid}_vu",
+                    )
+                    st.caption(f"Total do item: {dinheiro(qtd * vu)}")
+
+                    apagar = st.checkbox(
+                        "Excluir este item",
+                        value=False,
+                        key=f"orc_{numero}_{iid}_del",
+                    )
+
+                    if apagar:
+                        excluir_ids.append(iid)
+                    else:
+                        itens_editados.append(
+                            {
+                                "id": iid,
+                                "descricao": desc,
+                                "quantidade": float(qtd),
+                                "unidade": unidade,
+                                "valor_unitario": float(vu),
+                                "origem": item.get("origem", "manual"),
+                            }
+                        )
+
+            st.markdown("#### Adicionar item")
+            novo_desc = st.text_input("Descrição do novo item", key=f"novo_desc_{numero}")
+            c1, c2 = st.columns(2)
+            with c1:
+                nova_qtd = st.number_input(
+                    "Quantidade do novo item",
+                    min_value=0.0,
+                    value=1.0,
+                    step=1.0,
+                    key=f"nova_qtd_{numero}",
+                )
+            with c2:
+                nova_un = st.selectbox(
+                    "Unidade do novo item",
+                    UNIDADES_ITEM,
+                    key=f"nova_un_{numero}",
+                )
+            novo_vu = st.number_input(
+                "Valor unitário do novo item",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key=f"novo_vu_{numero}",
+            )
+
+            adicionar = st.checkbox("Adicionar este novo item ao salvar", key=f"add_item_{numero}")
+
+            obs_edit = st.text_area(
+                "Observações do orçamento",
+                value=o.get("observacoes", ""),
+                key=f"obs_orc_{numero}",
+            )
+
+            total_prev = calcular_total(itens_editados)
+            if adicionar and novo_desc.strip():
+                total_prev += float(nova_qtd) * float(novo_vu)
+
+            st.metric("Total atualizado", dinheiro(total_prev))
+
+            csave, cpdf = st.columns(2)
+            with csave:
+                if st.button("Salvar orçamento", type="primary", key=f"salvar_orc_{numero}"):
+                    novos_itens = itens_editados[:]
+                    if adicionar and novo_desc.strip():
+                        novos_itens.append(
+                            montar_item(novo_desc.strip(), nova_qtd, nova_un, novo_vu, origem="adm")
+                        )
+
+                    for original in orcamentos:
+                        if original.get("numero") == numero:
+                            original["itens"] = novos_itens
+                            original["observacoes"] = obs_edit
+                            original["atualizado_em"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            break
+
+                    try:
+                        salvar_orcamentos(orcamentos)
+                        st.success("Orçamento atualizado e salvo.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar orçamento: {e}")
+
+            with cpdf:
+                orc_pdf = copy.deepcopy(o)
+                orc_pdf["itens"] = itens_editados[:]
+                if adicionar and novo_desc.strip():
+                    orc_pdf["itens"].append(
+                        montar_item(novo_desc.strip(), nova_qtd, nova_un, novo_vu, origem="adm")
+                    )
+                orc_pdf["observacoes"] = obs_edit
+                pdf_bytes = gerar_pdf(orc_pdf)
+                st.download_button(
+                    "Baixar PDF",
+                    data=pdf_bytes,
+                    file_name=f"orcamento_{numero}_F_Climatizacao.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key=f"pdf_{numero}",
+                )
+
+
+# =========================================================
+# ADMIN - SERVIÇOS
+# =========================================================
+
+def aba_servicos():
+    secao("Serviços", "Ative, desative e edite os preços-base.")
+
+    for nome, dados in list(config["servicos"].items()):
+        with st.expander(nome):
+            dados["ativo"] = st.checkbox(
+                "Ativo",
+                value=bool(dados.get("ativo", True)),
+                key=f"serv_ativo_{nome}",
+            )
+            dados["mostrar_cliente"] = st.checkbox(
+                "Disponível para o cliente",
+                value=bool(dados.get("mostrar_cliente", True)),
+                key=f"serv_cliente_{nome}",
+            )
+            dados["descricao"] = st.text_area(
+                "Descrição",
+                value=dados.get("descricao", ""),
+                key=f"serv_desc_{nome}",
+            )
+
+            for cap in CAPACIDADES:
+                dados.setdefault("precos", {})
+                dados["precos"][cap] = st.number_input(
+                    cap,
+                    min_value=0.0,
+                    value=float(dados["precos"].get(cap, 0) or 0),
+                    step=10.0,
+                    key=f"serv_preco_{nome}_{cap}",
+                )
+
+
+# =========================================================
+# ADMIN - MATERIAIS
+# =========================================================
+
+def aba_materiais():
+    secao(
+        "Materiais",
+        "Catálogo interno. Estes itens não aparecem automaticamente para o cliente.",
+    )
+
+    st.info(
+        "Materiais podem ser adicionados manualmente a um orçamento pelo ADM com quantidade, unidade e valor."
+    )
+
+    remover = []
+    for nome, dados in list(config["materiais"].items()):
+        with st.expander(nome):
+            dados["ativo"] = st.checkbox(
+                "Ativo",
+                value=bool(dados.get("ativo", True)),
+                key=f"mat_ativo_{nome}",
+            )
+            unidade = dados.get("unidade", "metro")
+            if unidade not in UNIDADES_ITEM:
+                unidade = "metro"
+            dados["unidade"] = st.selectbox(
+                "Unidade",
+                UNIDADES_ITEM,
+                index=UNIDADES_ITEM.index(unidade),
+                key=f"mat_un_{nome}",
+            )
+            dados["preco"] = st.number_input(
+                "Preço de venda",
+                min_value=0.0,
+                value=float(dados.get("preco", 0) or 0),
+                step=1.0,
+                key=f"mat_val_{nome}",
+            )
+            if st.checkbox("Excluir material", key=f"mat_del_{nome}"):
+                remover.append(nome)
+
+    for nome in remover:
+        config["materiais"].pop(nome, None)
+
+    st.markdown("#### Criar material")
+    novo_nome = st.text_input("Nome do material", key="novo_mat_nome")
     c1, c2 = st.columns(2)
     with c1:
-        orc["cliente"]["nome"] = st.text_input("Cliente", value=orc.get("cliente", {}).get("nome", ""), key=f"orcnome_{indice}")
-        orc["cliente"]["telefone"] = st.text_input("Contato", value=orc.get("cliente", {}).get("telefone", ""), key=f"orctel_{indice}")
+        novo_un = st.selectbox("Unidade", UNIDADES_ITEM, key="novo_mat_un")
     with c2:
-        orc["cliente"]["cidade"] = st.text_input("Cidade", value=orc.get("cliente", {}).get("cidade", ""), key=f"orccidade_{indice}")
-        st.text_input("Data", value=orc.get("data", ""), disabled=True, key=f"orcdata_{indice}")
+        novo_preco = st.number_input(
+            "Preço",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            key="novo_mat_preco",
+        )
+    if st.button("Adicionar material", key="add_mat"):
+        if novo_nome.strip():
+            config["materiais"][novo_nome.strip()] = {
+                "unidade": novo_un,
+                "preco": float(novo_preco),
+                "ativo": True,
+            }
+            st.success("Material adicionado. Use Salvar alterações.")
+            st.rerun()
 
-    st.markdown("#### Itens")
-    novos_itens = []
-    for i, item in enumerate(orc.get("itens", [])):
-        with st.expander(f"{i+1}. {item.get('descricao','Item')}"):
-            item["descricao"] = st.text_input("Descrição", value=item.get("descricao", ""), key=f"oi_desc_{indice}_{i}")
-            col1, col2 = st.columns(2)
-            with col1:
-                item["quantidade"] = st.number_input("Quantidade", min_value=0.0, value=float(item.get("quantidade", 1)), step=1.0, key=f"oi_qtd_{indice}_{i}")
-                item["unidade"] = st.selectbox(
-                    "Unidade",
-                    ["metro", "unidade", "serviço", "equipamento", "avaliação"],
-                    index=["metro", "unidade", "serviço", "equipamento", "avaliação"].index(item.get("unidade", "serviço")) if item.get("unidade", "serviço") in ["metro", "unidade", "serviço", "equipamento", "avaliação"] else 2,
-                    key=f"oi_un_{indice}_{i}",
-                )
-            with col2:
-                item["valor_unitario"] = st.number_input("Valor unitário", min_value=0.0, value=float(item.get("valor_unitario", 0)), step=1.0, key=f"oi_vu_{indice}_{i}")
-                st.metric("Total do item", dinheiro(item["quantidade"] * item["valor_unitario"]))
-            item["total"] = item["quantidade"] * item["valor_unitario"]
-            remover = st.checkbox("Remover este item", key=f"oi_del_{indice}_{i}")
-            if not remover:
-                novos_itens.append(item)
 
-    orc["itens"] = novos_itens
+# =========================================================
+# ADMIN - APARELHOS
+# =========================================================
 
-    with st.expander("+ Adicionar novo item"):
-        nova_desc = st.text_input("Descrição do novo item", key=f"novo_desc_{indice}")
-        c1, c2 = st.columns(2)
-        with c1:
-            nova_qtd = st.number_input("Quantidade do novo item", min_value=0.0, value=1.0, step=1.0, key=f"novo_qtd_{indice}")
-            nova_un = st.selectbox("Unidade do novo item", ["metro", "unidade", "serviço", "equipamento", "avaliação"], key=f"novo_un_{indice}")
-        with c2:
-            novo_vu = st.number_input("Valor unitário do novo item", min_value=0.0, value=0.0, step=1.0, key=f"novo_vu_{indice}")
-        if st.button("Adicionar item ao orçamento", key=f"add_item_{indice}"):
-            if nova_desc.strip():
-                orc["itens"].append({
-                    "descricao": nova_desc.strip(),
-                    "quantidade": float(nova_qtd),
-                    "unidade": nova_un,
-                    "valor_unitario": float(novo_vu),
-                    "total": float(nova_qtd) * float(novo_vu),
-                })
-                lista[indice] = orc
-                salvar_orcamentos(lista)
-                st.success("Item adicionado.")
-                st.rerun()
-            else:
-                st.warning("Informe uma descrição para o item.")
-
-    orc["observacoes"] = st.text_area("Observações", value=orc.get("observacoes", ""), key=f"orcobs_{indice}")
-    orc["total"] = sum(float(i.get("total", 0)) for i in orc.get("itens", []))
-    st.metric("Total atualizado", dinheiro(orc["total"]))
-
-    if st.button("💾 Salvar orçamento atualizado", type="primary", key=f"salvar_orc_{indice}"):
-        lista[indice] = orc
-        persistiu = salvar_orcamentos(lista)
-        if persistiu:
-            st.success("Orçamento atualizado e salvo no histórico privado.")
-        else:
-            st.warning("Orçamento atualizado apenas nesta sessão. Configure o repositório privado para persistência.")
-
-    pdf = gerar_pdf_orcamento(orc)
-    st.download_button(
-        "📄 Baixar PDF profissional",
-        data=pdf,
-        file_name=f"orcamento_F_Climatizacao_{orc.get('numero','----')}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
+def aba_aparelhos():
+    secao(
+        "Aparelhos",
+        "Cadastre marca, capacidade, tipo e preço. A descrição é criada automaticamente.",
     )
+
+    remover = []
+
+    for eid, eq in list(config["equipamentos"].items()):
+        titulo = nome_equipamento(eq)
+
+        with st.expander(titulo):
+            eq["ativo"] = st.checkbox(
+                "Disponível para o cliente",
+                value=bool(eq.get("ativo", False)),
+                key=f"eq_ativo_{eid}",
+            )
+            eq["marca"] = st.text_input(
+                "Marca",
+                value=eq.get("marca", ""),
+                key=f"eq_marca_{eid}",
+            )
+
+            cap = eq.get("capacidade", "9.000 BTUs")
+            if cap not in CAPACIDADES:
+                cap = "9.000 BTUs"
+            eq["capacidade"] = st.selectbox(
+                "Capacidade",
+                CAPACIDADES,
+                index=CAPACIDADES.index(cap),
+                key=f"eq_cap_{eid}",
+            )
+
+            tipo = eq.get("tipo", "Inverter")
+            if tipo not in TIPOS_AR:
+                tipo = "Inverter"
+            eq["tipo"] = st.selectbox(
+                "Tipo",
+                TIPOS_AR,
+                index=TIPOS_AR.index(tipo),
+                key=f"eq_tipo_{eid}",
+            )
+
+            eq["preco"] = st.number_input(
+                "Preço estimado do equipamento",
+                min_value=0.0,
+                value=float(eq.get("preco", 0) or 0),
+                step=50.0,
+                key=f"eq_preco_{eid}",
+            )
+
+            st.caption(f"Descrição automática: {nome_equipamento(eq)}")
+
+            if st.checkbox("Excluir este aparelho", key=f"eq_del_{eid}"):
+                remover.append(eid)
+
+    for eid in remover:
+        config["equipamentos"].pop(eid, None)
+
+    st.markdown("#### Criar novo aparelho")
+
+    marca = st.text_input("Marca do novo aparelho", key="novo_eq_marca")
+    cap = st.selectbox("Capacidade do novo aparelho", CAPACIDADES, key="novo_eq_cap")
+    tipo = st.selectbox("Tipo do novo aparelho", TIPOS_AR, key="novo_eq_tipo")
+    preco = st.number_input(
+        "Preço estimado do novo aparelho",
+        min_value=0.0,
+        value=0.0,
+        step=50.0,
+        key="novo_eq_preco",
+    )
+    ativo = st.checkbox("Disponível para o cliente", value=True, key="novo_eq_ativo")
+
+    if st.button("Criar aparelho", key="criar_eq"):
+        if not marca.strip():
+            st.warning("Informe a marca.")
+        else:
+            eid = uuid.uuid4().hex[:12]
+            config["equipamentos"][eid] = {
+                "id": eid,
+                "marca": marca.strip(),
+                "capacidade": cap,
+                "tipo": tipo,
+                "preco": float(preco),
+                "ativo": bool(ativo),
+            }
+            try:
+                salvar_config()
+                st.success("Aparelho criado e salvo.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
+
+
+# =========================================================
+# ADMIN - REGRAS E EMPRESA
+# =========================================================
+
+def aba_regras():
+    secao("Regras", "Configure valores e avisos usados nas estimativas.")
+
+    config["regras"]["adicional_apartamento_2_mais"] = st.number_input(
+        "Adicional a partir do 2º piso",
+        min_value=0.0,
+        value=float(config["regras"].get("adicional_apartamento_2_mais", 0) or 0),
+        step=10.0,
+    )
+    config["regras"]["texto_variacao"] = st.text_area(
+        "Aviso geral de variação do orçamento",
+        value=config["regras"].get("texto_variacao", ""),
+    )
+    config["regras"]["texto_equipamento"] = st.text_area(
+        "Aviso de preço dos aparelhos",
+        value=config["regras"].get("texto_equipamento", ""),
+    )
+
+
+def aba_empresa():
+    secao("Empresa", "Dados exibidos no aplicativo e nos orçamentos.")
+
+    emp = config["empresa"]
+    emp["nome"] = st.text_input("Nome", value=emp.get("nome", "F Climatização"))
+    emp["slogan"] = st.text_input("Slogan", value=emp.get("slogan", ""))
+    emp["whatsapp"] = st.text_input(
+        "WhatsApp",
+        value=emp.get("whatsapp", ""),
+        help="Código do país + DDD + número. Exemplo: 5554999999999",
+    )
+    emp["local_atendimento"] = st.text_input(
+        "Cidade/UF",
+        value=emp.get("local_atendimento", "Não-Me-Toque/RS"),
+    )
+    emp["texto_atendimento"] = st.text_input(
+        "Texto da área de atendimento",
+        value=emp.get("texto_atendimento", "Atendimento em Não-Me-Toque e região"),
+    )
+
 
 # =========================================================
 # ADMIN
 # =========================================================
 
 def pagina_admin():
-    cabecalho("admin")
+    cabecalho(admin=True)
 
     if st.button("← Voltar para área do cliente", use_container_width=True):
         st.session_state["pagina"] = "cliente"
+        st.query_params.clear()
         st.rerun()
 
     if not ADMIN_KEY:
@@ -956,9 +1255,9 @@ def pagina_admin():
         return
 
     if not st.session_state.get("admin_logado", False):
-        titulo_secao("Acesso administrativo", "Digite a senha para continuar.")
-        senha = st.text_input("Senha", type="password", placeholder="Senha do administrador")
-        if st.button("ENTRAR NO PAINEL", type="primary", use_container_width=True):
+        secao("Acesso administrativo", "Digite a senha para continuar.")
+        senha = st.text_input("Senha", type="password")
+        if st.button("Entrar no painel", type="primary", use_container_width=True):
             if senha == ADMIN_KEY:
                 st.session_state["admin_logado"] = True
                 st.rerun()
@@ -969,426 +1268,328 @@ def pagina_admin():
     tabs = st.tabs(["Orçamentos", "Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
 
     with tabs[0]:
-        admin_orcamentos()
-
+        aba_orcamentos()
     with tabs[1]:
-        titulo_secao("Serviços", "Ative/desative e defina os preços por capacidade.")
-        for nome, dados in config["servicos"].items():
-            with st.expander(nome):
-                dados["ativo"] = st.checkbox("Ativo", value=dados.get("ativo", True), key=f"serv_ativo_{nome}")
-                dados["descricao"] = st.text_area("Descrição", value=dados.get("descricao", ""), key=f"serv_desc_{nome}")
-                for capacidade in ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]:
-                    dados["precos"][capacidade] = st.number_input(
-                        capacidade,
-                        min_value=0.0,
-                        value=float(dados.get("precos", {}).get(capacidade, 0)),
-                        step=10.0,
-                        key=f"serv_preco_{nome}_{capacidade}",
-                    )
-
+        aba_servicos()
     with tabs[2]:
-        titulo_secao("Materiais", "Preço por metro/unidade e visibilidade para o cliente.")
-        for nome, dados in config["materiais"].items():
-            with st.expander(nome):
-                dados["ativo"] = st.checkbox("Ativo", value=dados.get("ativo", True), key=f"mat_ativo_{nome}")
-                dados["mostrar_cliente"] = st.checkbox("Permitir que o cliente adicione", value=dados.get("mostrar_cliente", False), key=f"mat_cliente_{nome}")
-                unidades = ["metro", "unidade", "serviço"]
-                unidade = dados.get("unidade", "metro")
-                dados["unidade"] = st.selectbox("Unidade", unidades, index=unidades.index(unidade) if unidade in unidades else 0, key=f"mat_un_{nome}")
-                dados["preco"] = st.number_input("Preço de venda", min_value=0.0, value=float(dados.get("preco", 0)), step=1.0, key=f"mat_preco_{nome}")
-
+        aba_materiais()
     with tabs[3]:
-        titulo_secao(
-            "Aparelhos",
-            "Cadastre a marca, selecione capacidade e tipo, defina o preço e controle se aparece para o cliente.",
-        )
-
-        for chave, dados in list(config["equipamentos"].items()):
-            # Compatibilidade com cadastros antigos
-            if not dados.get("capacidade"):
-                for cap_legacy in ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]:
-                    if cap_legacy in str(chave):
-                        dados["capacidade"] = cap_legacy
-                        break
-            dados.setdefault("capacidade", "9.000 BTUs")
-            dados.setdefault("tipo", "Inverter")
-            dados.setdefault("marca", "")
-            dados.setdefault("ativo", False)
-            dados.setdefault("preco", 0.0)
-            dados.setdefault("material_metro", "")
-            dados.setdefault("permitir_metragem_cliente", True)
-
-            with st.expander(nome_equipamento(dados)):
-                dados["ativo"] = st.checkbox(
-                    "Ativo — mostrar este aparelho para o cliente",
-                    value=dados.get("ativo", False),
-                    key=f"eq_ativo_{chave}",
-                )
-                dados["marca"] = st.text_input(
-                    "Marca",
-                    value=dados.get("marca", ""),
-                    placeholder="Ex.: LG, Samsung, Midea, Luxor...",
-                    key=f"eq_marca_{chave}",
-                )
-
-                c1, c2 = st.columns(2)
-                with c1:
-                    caps = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
-                    cap = dados.get("capacidade", "9.000 BTUs")
-                    dados["capacidade"] = st.selectbox(
-                        "Capacidade",
-                        caps,
-                        index=caps.index(cap) if cap in caps else 0,
-                        key=f"eq_cap_{chave}",
-                    )
-                with c2:
-                    tipos = ["Inverter", "Convencional"]
-                    tipo = dados.get("tipo", "Inverter")
-                    dados["tipo"] = st.selectbox(
-                        "Tipo",
-                        tipos,
-                        index=tipos.index(tipo) if tipo in tipos else 0,
-                        key=f"eq_tipo_{chave}",
-                    )
-
-                dados["preco"] = st.number_input(
-                    "Preço estimado do equipamento (sem instalação)",
-                    min_value=0.0,
-                    value=float(dados.get("preco", 0)),
-                    step=50.0,
-                    key=f"eq_preco_{chave}",
-                )
-
-                materiais_metro = [""] + [
-                    n for n, m in config["materiais"].items()
-                    if m.get("ativo") and m.get("unidade") == "metro"
-                ]
-                atual = dados.get("material_metro", "")
-                dados["material_metro"] = st.selectbox(
-                    "Tubulação/material por metro associado",
-                    materiais_metro,
-                    index=materiais_metro.index(atual) if atual in materiais_metro else 0,
-                    key=f"eq_mat_{chave}",
-                    help="O cliente informa apenas a metragem; o sistema usa este material automaticamente.",
-                )
-                dados["permitir_metragem_cliente"] = st.checkbox(
-                    "Permitir que o cliente informe a metragem",
-                    value=dados.get("permitir_metragem_cliente", True),
-                    key=f"eq_metros_{chave}",
-                )
-
-                if st.button("EXCLUIR APARELHO", key=f"eq_del_btn_{chave}", use_container_width=True):
-                    try:
-                        del config["equipamentos"][chave]
-                        salvar_config_github(config)
-                        st.success("Aparelho excluído.")
-                        st.rerun()
-                    except Exception as erro:
-                        st.error(f"Não foi possível excluir: {erro}")
-
-        st.markdown("#### Criar novo aparelho")
-        nova_marca = st.text_input(
-            "Marca",
-            key="nova_marca",
-            placeholder="Ex.: LG, Samsung, Midea, Luxor...",
-        )
-
-        c1, c2 = st.columns(2)
-        with c1:
-            nova_cap = st.selectbox(
-                "Capacidade",
-                ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"],
-                key="nova_cap",
-            )
-        with c2:
-            novo_tipo = st.selectbox(
-                "Tipo",
-                ["Inverter", "Convencional"],
-                key="novo_tipo",
-            )
-
-        novo_preco = st.number_input(
-            "Preço estimado do aparelho (sem instalação)",
-            min_value=0.0,
-            value=0.0,
-            step=50.0,
-            key="novo_preco",
-        )
-        novo_ativo = st.checkbox(
-            "Criar já ativo para aparecer ao cliente",
-            value=True,
-            key="novo_ativo",
-        )
-
-        materiais_novo = [""] + [
-            n for n, m in config["materiais"].items()
-            if m.get("ativo") and m.get("unidade") == "metro"
-        ]
-        novo_material = st.selectbox(
-            "Tubulação/material por metro associado",
-            materiais_novo,
-            key="novo_material",
-            help="Opcional. Pode ser definido ou alterado depois.",
-        )
-
-        if st.button("+ CRIAR NOVO APARELHO", type="primary", use_container_width=True):
-            if not nova_marca.strip():
-                st.warning("Informe a marca do aparelho.")
-            else:
-                chave = f"eq_{int(datetime.now().timestamp())}"
-                config["equipamentos"][chave] = {
-                    "ativo": bool(novo_ativo),
-                    "marca": nova_marca.strip(),
-                    "capacidade": nova_cap,
-                    "tipo": novo_tipo,
-                    "preco": float(novo_preco),
-                    "material_metro": novo_material,
-                    "permitir_metragem_cliente": True,
-                }
-                try:
-                    salvar_config_github(config)
-                    st.success("Aparelho criado e salvo.")
-                    st.rerun()
-                except Exception as erro:
-                    del config["equipamentos"][chave]
-                    st.error(f"Não foi possível criar o aparelho: {erro}")
-
+        aba_aparelhos()
     with tabs[4]:
-        titulo_secao("Regras automáticas", "Defina adicionais e textos exibidos no orçamento.")
-        config["regras"]["adicional_apartamento_2_piso_ou_mais"] = st.number_input(
-            "Adicional para apartamento a partir do 2º piso",
-            min_value=0.0,
-            value=float(config["regras"].get("adicional_apartamento_2_piso_ou_mais", 0)),
-            step=10.0,
-        )
-        config["regras"]["texto_preco_equipamento"] = st.text_area(
-            "Observação sobre preço de equipamentos",
-            value=config["regras"].get("texto_preco_equipamento", ""),
-        )
-        config["regras"]["texto_estimativa"] = st.text_area(
-            "Observação geral da estimativa",
-            value=config["regras"].get("texto_estimativa", ""),
-        )
-
+        aba_regras()
     with tabs[5]:
-        titulo_secao("Empresa", "Informações usadas no aplicativo e nos orçamentos.")
-        config["empresa"]["nome"] = st.text_input("Nome", value=config["empresa"].get("nome", "F Climatização"))
-        config["empresa"]["slogan"] = st.text_input("Slogan", value=config["empresa"].get("slogan", "Conforto em todas as estações"))
-        config["empresa"]["whatsapp"] = st.text_input("WhatsApp", value=config["empresa"].get("whatsapp", ""), help="Código do país + DDD + número.")
-        config["empresa"]["cidade_base"] = st.text_input(
-            "Cidade base",
-            value=config["empresa"].get("cidade_base", "Não-Me-Toque/RS"),
-        )
-        config["empresa"]["regiao_texto"] = st.text_input(
-            "Texto da área de atendimento",
-            value=config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região"),
-        )
+        aba_empresa()
 
     st.divider()
-    if st.button("💾 SALVAR ALTERAÇÕES DO SISTEMA", type="primary", use_container_width=True):
-        try:
-            salvar_config_github(config)
-            st.success("Alterações salvas permanentemente.")
-        except Exception as erro:
-            st.error(f"Não foi possível salvar: {erro}")
 
-    if st.button("SAIR DO ADMINISTRADOR", use_container_width=True):
+    if st.button("Salvar alterações do sistema", type="primary", use_container_width=True):
+        try:
+            salvar_config()
+            st.success("Configurações salvas permanentemente.")
+        except Exception as e:
+            st.error(f"Erro ao salvar configurações: {e}")
+
+    if st.button("Sair do administrador", use_container_width=True):
         st.session_state["admin_logado"] = False
         st.session_state["pagina"] = "cliente"
+        st.query_params.clear()
         st.rerun()
+
 
 # =========================================================
 # CLIENTE
 # =========================================================
 
 def pagina_cliente():
-    cabecalho("cliente")
-    faixa_atendimento_whatsapp()
+    cabecalho(admin=False)
 
     st.markdown(
-        '<div class="f-card-blue"><div class="f-card-title">Orçamento rápido e prático</div>'
-        '<div class="f-card-text">Monte uma estimativa inicial. O valor final será confirmado antes do serviço.</div></div>',
+        """
+        <div class="info-card">
+          <div class="card-title">Orçamento rápido e prático</div>
+          <div class="card-text">
+            Monte uma estimativa inicial. O valor final será confirmado antes do serviço.
+          </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    titulo_secao("Seu aparelho", "Informe se já possui equipamento ou deseja comprar.")
-    possui = st.radio("Você já possui o aparelho?", ["Sim, já tenho o aparelho", "Não, quero comprar", "Ainda estou avaliando"])
+    secao("Seu aparelho", "Informe se já possui o equipamento ou deseja comprar.")
 
-    equipamento_key = None
-    capacidade = "Não sei"
-    metros_tubulacao = 0.0
+    possui = st.radio(
+        "Você já possui o aparelho?",
+        ["Sim, já tenho o aparelho", "Não, quero comprar", "Ainda estou avaliando"],
+    )
+
+    equipamento_id = None
+    equipamento = None
 
     if possui == "Não, quero comprar":
-        equipamentos_ativos = [(k, v) for k, v in config["equipamentos"].items() if v.get("ativo", False)]
-        if equipamentos_ativos:
-            labels = []
-            mapa = {}
-            for k, e in equipamentos_ativos:
-                label = nome_equipamento(e)
-                labels.append(label)
-                mapa[label] = k
-            escolha = st.selectbox("Escolha o aparelho", labels)
-            equipamento_key = mapa[escolha]
-            eq = config["equipamentos"][equipamento_key]
-            capacidade = eq.get("capacidade", "Não sei")
+        ativos = [
+            (eid, eq)
+            for eid, eq in config["equipamentos"].items()
+            if eq.get("ativo", False)
+        ]
+
+        if ativos:
+            mapa = {nome_equipamento(eq): eid for eid, eq in ativos}
+            escolha = st.selectbox("Escolha o aparelho", list(mapa.keys()))
+            equipamento_id = mapa[escolha]
+            equipamento = config["equipamentos"][equipamento_id]
+            capacidade = equipamento.get("capacidade", "9.000 BTUs")
+            st.caption(f"Preço-base do equipamento: {dinheiro(equipamento.get('preco',0))}")
             st.markdown(
-                f'<div class="f-card-orange"><div class="f-card-title">Valor estimado do equipamento: {dinheiro(eq.get("preco",0))}</div>'
-                f'<div class="f-card-text">{config["regras"].get("texto_preco_equipamento","")}</div></div>',
+                f"""
+                <div class="orange-card">
+                  <div class="card-title">Valor estimado do equipamento</div>
+                  <div class="card-text">{config["regras"].get("texto_equipamento","")}</div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            if eq.get("material_metro") and eq.get("permitir_metragem_cliente", True):
-                mat_nome = eq.get("material_metro")
-                mat = config["materiais"].get(mat_nome, {})
-                if mat.get("ativo", False):
-                    st.caption(f"{mat_nome}: {dinheiro(mat.get('preco',0))} por metro")
-                    metros_tubulacao = st.number_input("Quantos metros desse material deseja incluir?", min_value=0.0, value=0.0, step=0.5)
-                    if metros_tubulacao > 0:
-                        st.info(f"Total do material: {dinheiro(metros_tubulacao * float(mat.get('preco',0)))}")
         else:
-            st.info("Nenhum aparelho está ativo para venda no momento. Entre em contato pelo WhatsApp para consultar opções.")
+            capacidade = st.selectbox("Capacidade desejada", CAPACIDADES)
+            st.info("Nenhum aparelho está disponível no catálogo no momento. A equipe confirmará as opções pelo WhatsApp.")
     else:
-        capacidade = st.selectbox("Qual a capacidade do aparelho?", ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs", "Não sei"])
+        capacidade = st.selectbox("Capacidade do aparelho", CAPACIDADES + ["Não sei"])
 
-    titulo_secao("Serviço", "Selecione o que precisa.")
-    servicos_disponiveis = [nome for nome, dados in config["servicos"].items() if dados.get("ativo", True)]
-    servicos = st.multiselect("Serviços desejados", servicos_disponiveis, placeholder="Selecione um ou mais serviços")
+    secao("Serviços", "Selecione um ou mais serviços.")
 
-    titulo_secao("Local", "Essas informações ajudam a calcular a estimativa.")
+    servicos_ativos = [
+        nome
+        for nome, dados in config["servicos"].items()
+        if dados.get("ativo", True) and dados.get("mostrar_cliente", True)
+    ]
+
+    servicos = st.multiselect("Serviços desejados", servicos_ativos)
+
+    secao("Local do serviço", "Informações que ajudam a calcular a estimativa.")
+
     tipo_imovel = st.selectbox("Tipo de imóvel", ["Casa", "Apartamento", "Comércio", "Outro"])
-    piso = 1
+
+    andar = 0
     if tipo_imovel == "Apartamento":
-        piso = st.number_input("Em qual piso/andar será o serviço?", min_value=1, value=1, step=1)
-        if piso >= 2 and float(config["regras"].get("adicional_apartamento_2_piso_ou_mais", 0) or 0) > 0:
-            st.caption(f"Adicional estimado a partir do 2º piso: {dinheiro(config['regras']['adicional_apartamento_2_piso_ou_mais'])}")
+        andar = st.number_input(
+            "Andar/piso",
+            min_value=0,
+            value=1,
+            step=1,
+            help="A partir do 2º piso pode haver adicional, conforme configuração da empresa.",
+        )
 
-    area = st.selectbox("Tamanho aproximado do ambiente", ["Não sei", "Até 10 m²", "11 a 15 m²", "16 a 20 m²", "21 a 30 m²", "Mais de 30 m²"])
+    area = st.selectbox(
+        "Tamanho aproximado do ambiente",
+        ["Não sei", "Até 10 m²", "11 a 15 m²", "16 a 20 m²", "21 a 30 m²", "Mais de 30 m²"],
+    )
 
-    titulo_secao("Materiais opcionais", "Somente itens que a empresa deixou disponíveis aparecem aqui.")
-    materiais_cliente = {}
-    materiais_visiveis = [(n, m) for n, m in config["materiais"].items() if m.get("ativo") and m.get("mostrar_cliente")]
-    if materiais_visiveis:
-        for nome, mat in materiais_visiveis:
-            unidade = mat.get("unidade", "unidade")
-            st.caption(f"{nome}: {dinheiro(mat.get('preco',0))} por {unidade}")
-            qtd = st.number_input(f"Quantidade - {nome}", min_value=0.0, value=0.0, step=0.5 if unidade == "metro" else 1.0, key=f"cli_mat_{nome}")
-            materiais_cliente[nome] = qtd
-            if qtd > 0:
-                st.caption(f"Total: {dinheiro(qtd * float(mat.get('preco',0)))}")
-    else:
-        st.caption("Nenhum material opcional disponível para seleção.")
+    secao(
+        "Serviço ou material adicional",
+        "Use somente se existir algo além das opções acima.",
+    )
 
-    titulo_secao("Serviço ou material adicional", "Use somente se existir algo que não apareceu nas opções acima.")
-    adicional_sim = st.radio("Precisa de algum serviço ou material adicional?", ["Não", "Sim"], horizontal=True) == "Sim"
+    adicional_sim = st.radio(
+        "Precisa de algum serviço ou material adicional?",
+        ["Não", "Sim"],
+        horizontal=True,
+    )
+
     adicional_desc = ""
-    if adicional_sim:
-        adicional_desc = st.text_area("Descreva o adicional, se souber", placeholder="Ex.: adaptação específica, material ou serviço adicional")
-        if not adicional_desc.strip():
-            st.caption("Se não descrever, o orçamento registrará que existe um adicional sujeito à avaliação e possível mudança de preço.")
+    if adicional_sim == "Sim":
+        adicional_desc = st.text_area(
+            "Se quiser, descreva o adicional",
+            placeholder="Ex.: material extra, ajuste elétrico, acesso especial...",
+        )
 
-    observacoes = st.text_area("Outras observações", placeholder="Informações que possam ajudar no atendimento")
+    observacoes = st.text_area(
+        "Outras observações",
+        placeholder="Informações que possam ajudar no atendimento.",
+    )
 
-    titulo_secao("Seus dados", "Preencha para identificar e registrar o orçamento.")
+    secao("Seus dados", "Preencha para identificar e registrar o orçamento.")
+
     nome_cliente = st.text_input("Nome")
     telefone = st.text_input("Telefone / WhatsApp")
     cidade = st.text_input("Cidade")
 
     if st.button("GERAR ORÇAMENTO", type="primary", use_container_width=True):
-        if not nome_cliente.strip() or not telefone.strip():
-            st.warning("Informe pelo menos nome e telefone/WhatsApp.")
+        if not nome_cliente.strip():
+            st.warning("Informe o nome do cliente.")
             return
-        if not servicos and not equipamento_key:
+
+        if not telefone.strip():
+            st.warning("Informe um telefone/WhatsApp.")
+            return
+
+        if not servicos and equipamento is None:
             st.warning("Selecione pelo menos um serviço ou um aparelho.")
             return
 
-        itens, tem_equipamento = calcular_itens_orcamento(
-            servicos,
-            capacidade,
-            equipamento_key,
-            metros_tubulacao,
-            materiais_cliente,
-            tipo_imovel,
-            piso,
-            adicional_sim,
-            adicional_desc,
-        )
-        total = sum(float(i.get("total", 0)) for i in itens)
-        historico = carregar_orcamentos()
-        numero = proximo_numero_orcamento(historico)
-        agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+        itens = []
 
-        orcamento = {
+        cap_calculo = capacidade if capacidade in CAPACIDADES else None
+
+        if equipamento is not None:
+            itens.append(
+                montar_item(
+                    nome_equipamento(equipamento),
+                    1,
+                    "equipamento",
+                    equipamento.get("preco", 0),
+                    origem="equipamento",
+                )
+            )
+
+        if cap_calculo:
+            for nome_servico in servicos:
+                dados = config["servicos"][nome_servico]
+                valor = float(dados.get("precos", {}).get(cap_calculo, 0) or 0)
+                itens.append(
+                    montar_item(
+                        f"{nome_servico} • {cap_calculo}",
+                        1,
+                        "serviço",
+                        valor,
+                        origem="servico",
+                    )
+                )
+        else:
+            for nome_servico in servicos:
+                itens.append(
+                    montar_item(
+                        f"{nome_servico} • capacidade a confirmar",
+                        1,
+                        "serviço",
+                        0,
+                        origem="servico",
+                    )
+                )
+
+        if tipo_imovel == "Apartamento" and int(andar) >= 2:
+            valor_andar = float(config["regras"].get("adicional_apartamento_2_mais", 0) or 0)
+            if valor_andar > 0:
+                itens.append(
+                    montar_item(
+                        f"Adicional de acesso • {int(andar)}º piso",
+                        1,
+                        "serviço",
+                        valor_andar,
+                        origem="regra",
+                    )
+                )
+
+        orcamentos = carregar_orcamentos()
+        numero = proximo_numero(orcamentos)
+
+        novo = {
             "numero": numero,
-            "data": agora,
-            "cliente": {"nome": nome_cliente.strip(), "telefone": telefone.strip(), "cidade": cidade.strip()},
-            "tipo_imovel": tipo_imovel,
-            "piso": int(piso) if tipo_imovel == "Apartamento" else None,
-            "area": area,
+            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "cliente": {
+                "nome": nome_cliente.strip(),
+                "telefone": telefone.strip(),
+                "cidade": cidade.strip(),
+            },
+            "possui_aparelho": possui,
             "capacidade": capacidade,
-            "observacoes": observacoes.strip(),
-            "adicional_solicitado": adicional_sim,
-            "adicional_descricao": adicional_desc.strip() if adicional_desc.strip() else ("Adicional solicitado - sujeito a avaliação e possível alteração de valor" if adicional_sim else ""),
+            "tipo_imovel": tipo_imovel,
+            "andar": int(andar) if tipo_imovel == "Apartamento" else None,
+            "area_ambiente": area,
+            "equipamento_id": equipamento_id,
             "itens": itens,
-            "total": total,
-            "tem_equipamento": tem_equipamento,
+            "adicional": {
+                "solicitado": adicional_sim == "Sim",
+                "descricao": adicional_desc.strip(),
+            },
+            "observacoes": observacoes.strip(),
         }
 
-        historico.append(orcamento)
-        persistiu = salvar_orcamentos(historico)
-        st.session_state["ultimo_orcamento"] = orcamento
-        st.session_state["ultimo_orcamento_persistiu"] = persistiu
+        try:
+            orcamentos.append(novo)
+            salvar_orcamentos(orcamentos)
+            st.session_state["ultimo_orcamento"] = novo
+            st.success(f"Orçamento {numero} salvo com sucesso.")
+        except Exception as e:
+            st.error(f"Não foi possível salvar o orçamento: {e}")
+            return
 
-    if st.session_state.get("ultimo_orcamento"):
-        orcamento = st.session_state["ultimo_orcamento"]
-        titulo_secao(f"Orçamento #{orcamento['numero']}", "Estimativa calculada com base nas informações fornecidas.")
+    ultimo = st.session_state.get("ultimo_orcamento")
 
-        for item in orcamento["itens"]:
-            if float(item.get("total", 0)) > 0:
-                st.write(f"**{item['descricao']}** — {item['quantidade']:g} {item['unidade']} × {dinheiro(item['valor_unitario'])} = **{dinheiro(item['total'])}**")
-            else:
-                st.write(f"**{item['descricao']}**")
+    if ultimo:
+        numero = ultimo["numero"]
+        total = calcular_total(ultimo.get("itens", []))
 
-        st.metric("TOTAL ESTIMADO", dinheiro(orcamento["total"]))
+        secao(f"Orçamento {numero}", "Estimativa registrada com sucesso.")
+
+        st.metric("Total estimado", dinheiro(total))
+
+        for item in ultimo.get("itens", []):
+            qtd = float(item.get("quantidade", 0) or 0)
+            vu = float(item.get("valor_unitario", 0) or 0)
+            st.write(
+                f"**{item.get('descricao','')}** — {qtd:g} {item.get('unidade','')} × "
+                f"{dinheiro(vu)} = **{dinheiro(qtd * vu)}**"
+            )
+
+        if ultimo.get("adicional", {}).get("solicitado"):
+            desc = ultimo.get("adicional", {}).get("descricao", "").strip()
+            texto = (
+                f"O cliente informou a seguinte necessidade adicional: {desc}"
+                if desc
+                else "O cliente indicou possível necessidade de serviço ou material adicional. O valor final poderá sofrer ajuste após avaliação técnica."
+            )
+            st.markdown(
+                f'<div class="orange-card"><div class="card-title">Solicitação adicional</div><div class="card-text">{texto}</div></div>',
+                unsafe_allow_html=True,
+            )
+
         st.markdown(
-            f'<div class="f-card-orange"><div class="f-card-title">Importante</div><div class="f-card-text">{config["regras"].get("texto_estimativa","")}</div></div>',
+            f"""
+            <div class="info-card">
+              <div class="card-title">Estimativa inicial</div>
+              <div class="card-text">{config["regras"].get("texto_variacao","")}</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-        if orcamento.get("tem_equipamento"):
-            st.caption(config["regras"].get("texto_preco_equipamento", ""))
-
-        if not st.session_state.get("ultimo_orcamento_persistiu", False):
-            st.warning("Este orçamento foi gerado, mas o histórico permanente ainda depende da configuração do repositório privado de dados.")
-
-        pdf = gerar_pdf_orcamento(orcamento)
+        pdf = gerar_pdf(ultimo)
         st.download_button(
-            "📄 BAIXAR ORÇAMENTO EM PDF",
+            "BAIXAR ORÇAMENTO EM PDF",
             data=pdf,
-            file_name=f"orcamento_F_Climatizacao_{orcamento['numero']}.pdf",
+            file_name=f"orcamento_{numero}_F_Climatizacao.pdf",
             mime="application/pdf",
+            type="primary",
             use_container_width=True,
         )
 
         mensagem = (
-            f"Olá! Segue minha solicitação de orçamento #{orcamento['numero']} da {config['empresa']['nome']}.\n\n"
-            f"Cliente: {orcamento['cliente']['nome']}\n"
-            f"Contato: {orcamento['cliente']['telefone']}\n"
-            f"Cidade: {orcamento['cliente']['cidade']}\n"
-            f"Total estimado: {dinheiro(orcamento['total'])}\n\n"
-            "Gostaria de confirmar os detalhes e as condições finais do orçamento."
+            f"Olá! Sou {ultimo['cliente']['nome']}. "
+            f"Gerei o orçamento nº {numero} pelo sistema da F Climatização. "
+            "Vou enviar o PDF do orçamento para conferência."
         )
-        st.link_button("SOLICITAR / CONFIRMAR PELO WHATSAPP", link_whatsapp(mensagem), use_container_width=True)
+
+        st.link_button(
+            "FALAR PELO WHATSAPP",
+            link_whatsapp(mensagem),
+            use_container_width=True,
+        )
 
     st.markdown(
-        '<div class="f-footer"><div class="f-footer-name">F CLIMATIZAÇÃO</div>'
-        f'<div class="f-footer-sub">{config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região")}</div></div>',
+        """
+        <div class="footer-box">
+          F CLIMATIZAÇÃO<br/>
+          Orçamento inicial sujeito à avaliação técnica e confirmação final.
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
     with st.expander("Área administrativa"):
         st.caption("Acesso exclusivo da administração.")
-        if st.button("ACESSAR PAINEL ADMINISTRATIVO", use_container_width=True):
+        if st.button("Acessar painel administrativo", use_container_width=True):
             st.session_state["pagina"] = "admin"
             st.rerun()
+
 
 # =========================================================
 # NAVEGAÇÃO
@@ -1396,6 +1597,9 @@ def pagina_cliente():
 
 if "pagina" not in st.session_state:
     st.session_state["pagina"] = "cliente"
+
+if st.query_params.get("modo", "") == "admin":
+    st.session_state["pagina"] = "admin"
 
 if st.session_state["pagina"] == "admin":
     pagina_admin()
