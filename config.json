@@ -1,7 +1,7 @@
 {
   "empresa": {
     "nome": "F Climatização",
-    "slogan": "Seu ambiente na temperatura ideal",
+    "slogan": "Seu ambiente na temperatura ideal.",
     "whatsapp": "5554991666600"
   },
   "servicos": {
@@ -102,65 +102,103 @@
     "Tubo de cobre 1/4\"": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Tubo de cobre 3/8\"": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Tubo de cobre 1/2\"": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Tubo de cobre 5/8\"": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Tubo de cobre 3/4\"": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Canaleta": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": true
     },
     "Cabo elétrico": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Mangueira de dreno": {
       "unidade": "metro",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": false
     },
     "Suporte para condensadora": {
       "unidade": "unidade",
       "preco": 0.0,
-      "ativo": true
+      "ativo": true,
+      "mostrar_cliente": true
     }
   },
   "equipamentos": {
     "Split 9.000 BTUs": {
       "preco": 0.0,
-      "ativo": false
+      "ativo": false,
+      "marca": "",
+      "modelo": "",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Inverter",
+      "material_metro": "",
+      "permitir_metragem_cliente": true
     },
     "Split 12.000 BTUs": {
       "preco": 0.0,
-      "ativo": false
+      "ativo": false,
+      "marca": "",
+      "modelo": "",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Inverter",
+      "material_metro": "",
+      "permitir_metragem_cliente": true
     },
     "Split 18.000 BTUs": {
       "preco": 0.0,
-      "ativo": false
+      "ativo": false,
+      "marca": "",
+      "modelo": "",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Inverter",
+      "material_metro": "",
+      "permitir_metragem_cliente": true
     },
     "Split 24.000 BTUs": {
       "preco": 0.0,
-      "ativo": false
+      "ativo": false,
+      "marca": "",
+      "modelo": "",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Inverter",
+      "material_metro": "",
+      "permitir_metragem_cliente": true
     }
+  },
+  "regras": {
+    "adicional_apartamento_2_piso_ou_mais": 0.0,
+    "texto_preco_equipamento": "O valor do equipamento é uma estimativa aproximada e pode variar conforme a disponibilidade e a cotação do fornecedor no dia. O valor final será confirmado pela F Climatização antes do fechamento do orçamento.",
+    "texto_estimativa": "Este orçamento é uma estimativa inicial. O valor final pode variar conforme as condições reais do local, acesso, altura, materiais adicionais e necessidades identificadas na avaliação. Qualquer alteração será informada antes da execução."
   }
 }
