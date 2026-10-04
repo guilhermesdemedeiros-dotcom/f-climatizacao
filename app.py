@@ -7,6 +7,7 @@ import urllib.error
 from urllib.parse import quote
 from io import BytesIO
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import copy
 import uuid
@@ -55,6 +56,7 @@ ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
 CAPACIDADES = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
 TIPOS_AR = ["Inverter", "Convencional"]
 UNIDADES_ITEM = ["unidade", "metro", "serviço", "equipamento"]
+FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 # =========================================================
 # VISUAL
@@ -1267,7 +1269,7 @@ def aba_orcamentos():
                         if original.get("numero") == numero:
                             original["itens"] = novos_itens
                             original["observacoes"] = obs_edit
-                            original["atualizado_em"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            original["atualizado_em"] = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M")
                             break
 
                     try:
@@ -1879,7 +1881,7 @@ def pagina_cliente():
 
         novo = {
             "numero": numero,
-            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "data": datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M"),
             "cliente": {
                 "nome": nome_cliente.strip(),
                 "telefone": telefone.strip(),
