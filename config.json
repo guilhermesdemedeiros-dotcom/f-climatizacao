@@ -166,6 +166,15 @@
       "tipo": "Inverter",
       "material_metro": "",
       "permitir_metragem_cliente": true
+    },
+    "eq_1791079198": {
+      "ativo": true,
+      "marca": "Luxor",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 1820.0,
+      "material_metro": "",
+      "permitir_metragem_cliente": true
     }
   },
   "regras": {
