@@ -129,7 +129,7 @@
     "adicional_apartamento_2_piso_ou_mais": 0.0,
     "texto_preco_equipamento": "O valor do equipamento é uma estimativa aproximada e pode variar conforme a disponibilidade e a cotação do fornecedor no dia. O valor final será confirmado pela F Climatização antes do fechamento do orçamento.",
     "texto_estimativa": "Este orçamento é uma estimativa inicial. O valor final pode variar conforme as condições reais do local, acesso, altura, materiais adicionais e necessidades identificadas na avaliação. Qualquer alteração será informada antes da execução.",
-    "adicional_apartamento_2_mais": 0.0,
+    "adicional_apartamento_2_mais": 120.0,
     "texto_variacao": "Esta é uma estimativa inicial. O valor final pode variar conforme materiais necessários, acesso, altura, condições do local e avaliação técnica.",
     "texto_equipamento": "O valor do equipamento é uma referência aproximada e pode variar conforme disponibilidade e cotação do fornecedor no dia. O valor final será confirmado antes do fechamento."
   }
