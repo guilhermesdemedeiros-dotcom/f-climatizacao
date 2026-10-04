@@ -85,33 +85,74 @@ h1, h2, h3, h4, h5, h6, p, label,
 .brand-shell {
     background: linear-gradient(135deg, rgba(5,17,35,.98), rgba(6,43,99,.96) 58%, rgba(8,120,232,.92));
     border: 1px solid rgba(32,164,255,.34);
-    border-radius: 24px;
-    padding: 17px;
-    box-shadow: 0 18px 42px rgba(0,0,0,.34);
+    border-radius: 22px;
+    padding: 13px 15px;
+    box-shadow: 0 15px 36px rgba(0,0,0,.30);
     overflow: hidden;
 }
-
+.brand-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+.brand-logo {
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+    flex: 0 0 52px;
+}
+.brand-copy { min-width: 0; }
 .brand-title {
     color: #FFFFFF;
     font-weight: 950;
-    font-size: 23px;
+    font-size: 21px;
     line-height: 1.05;
     letter-spacing: .15px;
 }
-
 .brand-title .accent { color: #FF8A00; }
 .brand-subtitle {
     color: #D4E7FF;
-    font-size: 12.5px;
-    margin-top: 7px;
+    font-size: 12px;
+    margin-top: 5px;
     font-weight: 600;
 }
 .brand-kicker {
     color: #FF9B1A;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 900;
-    letter-spacing: .9px;
-    margin-bottom: 5px;
+    letter-spacing: .8px;
+    margin-bottom: 4px;
+}
+.quick-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 2px 2px;
+}
+.service-area {
+    color: #94A8C0;
+    font-size: 11.5px;
+    font-weight: 650;
+}
+.quick-whatsapp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none !important;
+    color: #D9FFE9 !important;
+    background: rgba(13,174,101,.10);
+    border: 1px solid rgba(21,201,122,.30);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 11.5px;
+    font-weight: 800;
+}
+.quick-whatsapp:hover {
+    background: rgba(13,174,101,.17);
+    color: #FFFFFF !important;
 }
 
 /* SEÇÕES */
@@ -238,8 +279,10 @@ div[data-baseweb="tab-highlight"] { background-color: #FF7A00 !important; }
 
 @media (max-width: 600px) {
     .block-container { padding-left: .85rem; padding-right: .85rem; }
-    .brand-title { font-size: 19px; }
-    .brand-subtitle { font-size: 12px; }
+    .brand-title { font-size: 18px; }
+    .brand-subtitle { font-size: 11.5px; }
+    .brand-logo { width: 46px; height: 46px; flex-basis: 46px; }
+    .quick-strip { padding-top: 7px; }
     .section-title { font-size: 18px; }
 }
 </style>
@@ -275,6 +318,8 @@ DEFAULT_CONFIG = {
         "nome": "F Climatização",
         "slogan": "Conforto em todas as estações",
         "whatsapp": "5555999999999",
+        "cidade_base": "Não-Me-Toque/RS",
+        "regiao_texto": "Atendimento em Não-Me-Toque e região",
     },
     "regras": {
         "adicional_apartamento_2_piso_ou_mais": 0.0,
@@ -476,6 +521,31 @@ def encontrar_logo():
     return None
 
 
+def logo_data_uri():
+    caminho = encontrar_logo()
+    if not caminho:
+        return ""
+    try:
+        with open(caminho, "rb") as arquivo:
+            conteudo = base64.b64encode(arquivo.read()).decode("ascii")
+        ext = os.path.splitext(caminho)[1].lower()
+        mime = "image/png" if ext == ".png" else "image/jpeg"
+        return f"data:{mime};base64,{conteudo}"
+    except Exception:
+        return ""
+
+
+def nome_equipamento(dados):
+    marca = str(dados.get("marca", "")).strip()
+    capacidade = str(dados.get("capacidade", "")).strip() or "Capacidade não informada"
+    tipo = str(dados.get("tipo", "")).strip() or "Tipo não informado"
+    partes = ["Ar-condicionado"]
+    if marca:
+        partes.append(marca)
+    partes.extend([capacidade, tipo])
+    return " • ".join(partes)
+
+
 def link_whatsapp(texto):
     numero = "".join(c for c in config["empresa"].get("whatsapp", "") if c.isdigit())
     return f"https://wa.me/{numero}?text={quote(texto)}"
@@ -490,28 +560,49 @@ def titulo_secao(titulo, subtitulo=""):
 
 
 def cabecalho(area="cliente"):
-    logo = encontrar_logo()
-    col_logo, col_texto = st.columns([1.0, 2.8], vertical_alignment="center")
-    with col_logo:
-        if logo:
-            st.image(logo, use_container_width=True)
-    with col_texto:
-        if area == "admin":
-            html = (
-                '<div class="brand-shell">'
-                '<div class="brand-kicker">ADMINISTRAÇÃO</div>'
-                '<div class="brand-title">F <span class="accent">CLIMATIZAÇÃO</span></div>'
-                '<div class="brand-subtitle">Painel de gestão, preços e orçamentos</div>'
-                '</div>'
-            )
-        else:
-            html = (
-                '<div class="brand-shell">'
-                f'<div class="brand-title">{config["empresa"].get("nome", "F Climatização").upper()}</div>'
-                f'<div class="brand-subtitle">{config["empresa"].get("slogan", "Conforto em todas as estações")}</div>'
-                '</div>'
-            )
-        st.markdown(html, unsafe_allow_html=True)
+    logo_uri = logo_data_uri()
+    img = f'<img class="brand-logo" src="{logo_uri}" alt="Logo F Climatização">' if logo_uri else ""
+
+    if area == "admin":
+        html = (
+            '<div class="brand-shell">'
+            '<div class="brand-row">'
+            f'{img}'
+            '<div class="brand-copy">'
+            '<div class="brand-kicker">ADMINISTRAÇÃO</div>'
+            '<div class="brand-title">F <span class="accent">CLIMATIZAÇÃO</span></div>'
+            '<div class="brand-subtitle">Painel de gestão, preços e orçamentos</div>'
+            '</div></div></div>'
+        )
+    else:
+        nome = config["empresa"].get("nome", "F Climatização").upper()
+        slogan = config["empresa"].get("slogan", "Conforto em todas as estações")
+        html = (
+            '<div class="brand-shell">'
+            '<div class="brand-row">'
+            f'{img}'
+            '<div class="brand-copy">'
+            f'<div class="brand-title">{nome}</div>'
+            f'<div class="brand-subtitle">{slogan}</div>'
+            '</div></div></div>'
+        )
+
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def faixa_atendimento_whatsapp():
+    cidade = config["empresa"].get("cidade_base", "Não-Me-Toque/RS")
+    regiao = config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região")
+    mensagem = quote("Olá! Gostaria de falar com a F Climatização para solicitar um orçamento.")
+    numero = "".join(c for c in config["empresa"].get("whatsapp", "") if c.isdigit())
+    href = f"https://wa.me/{numero}?text={mensagem}" if numero else "#"
+    st.markdown(
+        f'<div class="quick-strip">'
+        f'<div class="service-area">📍 {regiao or cidade}</div>'
+        f'<a class="quick-whatsapp" href="{href}" target="_blank" rel="noopener noreferrer">WhatsApp</a>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 # =========================================================
 # PDF PROFISSIONAL
@@ -688,9 +779,9 @@ def calcular_itens_orcamento(servicos, capacidade, equipamento_key, metros_tubul
     if equipamento_key:
         eq = config["equipamentos"].get(equipamento_key, {})
         valor_eq = float(eq.get("preco", 0) or 0)
-        descricao = " - ".join(x for x in [eq.get("marca", ""), eq.get("modelo", ""), eq.get("capacidade", ""), eq.get("tipo", "")] if x)
+        descricao = nome_equipamento(eq)
         itens.append({
-            "descricao": f"Equipamento: {descricao or equipamento_key}",
+            "descricao": descricao,
             "quantidade": 1.0,
             "unidade": "equipamento",
             "valor_unitario": valor_eq,
@@ -907,65 +998,160 @@ def pagina_admin():
                 dados["preco"] = st.number_input("Preço de venda", min_value=0.0, value=float(dados.get("preco", 0)), step=1.0, key=f"mat_preco_{nome}")
 
     with tabs[3]:
-        titulo_secao("Aparelhos", "Crie modelos e defina marca, tipo, capacidade, preço e tubulação associada.")
+        titulo_secao(
+            "Aparelhos",
+            "Cadastre a marca, selecione capacidade e tipo, defina o preço e controle se aparece para o cliente.",
+        )
 
         for chave, dados in list(config["equipamentos"].items()):
-            titulo = f"{dados.get('marca','')} {dados.get('modelo','')} - {dados.get('capacidade','')}"
-            with st.expander(titulo.strip() or chave):
-                dados["ativo"] = st.checkbox("Ativo", value=dados.get("ativo", False), key=f"eq_ativo_{chave}")
-                dados["marca"] = st.text_input("Marca", value=dados.get("marca", ""), key=f"eq_marca_{chave}")
-                dados["modelo"] = st.text_input("Modelo", value=dados.get("modelo", ""), key=f"eq_modelo_{chave}")
-                caps = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
-                cap = dados.get("capacidade", "9.000 BTUs")
-                dados["capacidade"] = st.selectbox("Capacidade", caps, index=caps.index(cap) if cap in caps else 0, key=f"eq_cap_{chave}")
-                tipos = ["Inverter", "Convencional"]
-                tipo = dados.get("tipo", "Inverter")
-                dados["tipo"] = st.selectbox("Tipo", tipos, index=tipos.index(tipo) if tipo in tipos else 0, key=f"eq_tipo_{chave}")
-                dados["preco"] = st.number_input("Preço do equipamento (sem instalação)", min_value=0.0, value=float(dados.get("preco", 0)), step=50.0, key=f"eq_preco_{chave}")
+            # Compatibilidade com cadastros antigos
+            if not dados.get("capacidade"):
+                for cap_legacy in ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]:
+                    if cap_legacy in str(chave):
+                        dados["capacidade"] = cap_legacy
+                        break
+            dados.setdefault("capacidade", "9.000 BTUs")
+            dados.setdefault("tipo", "Inverter")
+            dados.setdefault("marca", "")
+            dados.setdefault("ativo", False)
+            dados.setdefault("preco", 0.0)
+            dados.setdefault("material_metro", "")
+            dados.setdefault("permitir_metragem_cliente", True)
 
-                materiais_metro = [""] + [n for n, m in config["materiais"].items() if m.get("ativo") and m.get("unidade") == "metro"]
+            with st.expander(nome_equipamento(dados)):
+                dados["ativo"] = st.checkbox(
+                    "Ativo — mostrar este aparelho para o cliente",
+                    value=dados.get("ativo", False),
+                    key=f"eq_ativo_{chave}",
+                )
+                dados["marca"] = st.text_input(
+                    "Marca",
+                    value=dados.get("marca", ""),
+                    placeholder="Ex.: LG, Samsung, Midea, Luxor...",
+                    key=f"eq_marca_{chave}",
+                )
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    caps = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
+                    cap = dados.get("capacidade", "9.000 BTUs")
+                    dados["capacidade"] = st.selectbox(
+                        "Capacidade",
+                        caps,
+                        index=caps.index(cap) if cap in caps else 0,
+                        key=f"eq_cap_{chave}",
+                    )
+                with c2:
+                    tipos = ["Inverter", "Convencional"]
+                    tipo = dados.get("tipo", "Inverter")
+                    dados["tipo"] = st.selectbox(
+                        "Tipo",
+                        tipos,
+                        index=tipos.index(tipo) if tipo in tipos else 0,
+                        key=f"eq_tipo_{chave}",
+                    )
+
+                dados["preco"] = st.number_input(
+                    "Preço estimado do equipamento (sem instalação)",
+                    min_value=0.0,
+                    value=float(dados.get("preco", 0)),
+                    step=50.0,
+                    key=f"eq_preco_{chave}",
+                )
+
+                materiais_metro = [""] + [
+                    n for n, m in config["materiais"].items()
+                    if m.get("ativo") and m.get("unidade") == "metro"
+                ]
                 atual = dados.get("material_metro", "")
                 dados["material_metro"] = st.selectbox(
-                    "Material/tubulação por metro associado ao modelo",
+                    "Tubulação/material por metro associado",
                     materiais_metro,
                     index=materiais_metro.index(atual) if atual in materiais_metro else 0,
                     key=f"eq_mat_{chave}",
+                    help="O cliente informa apenas a metragem; o sistema usa este material automaticamente.",
                 )
                 dados["permitir_metragem_cliente"] = st.checkbox(
-                    "Permitir que o cliente informe a metragem dessa tubulação",
+                    "Permitir que o cliente informe a metragem",
                     value=dados.get("permitir_metragem_cliente", True),
                     key=f"eq_metros_{chave}",
                 )
-                if st.checkbox("Excluir este aparelho", key=f"eq_del_{chave}"):
-                    del config["equipamentos"][chave]
-                    st.rerun()
+
+                if st.button("EXCLUIR APARELHO", key=f"eq_del_btn_{chave}", use_container_width=True):
+                    try:
+                        del config["equipamentos"][chave]
+                        salvar_config_github(config)
+                        st.success("Aparelho excluído.")
+                        st.rerun()
+                    except Exception as erro:
+                        st.error(f"Não foi possível excluir: {erro}")
 
         st.markdown("#### Criar novo aparelho")
-        nova_marca = st.text_input("Marca do novo aparelho", key="nova_marca")
-        novo_modelo = st.text_input("Modelo do novo aparelho", key="novo_modelo")
+        nova_marca = st.text_input(
+            "Marca",
+            key="nova_marca",
+            placeholder="Ex.: LG, Samsung, Midea, Luxor...",
+        )
+
         c1, c2 = st.columns(2)
         with c1:
-            nova_cap = st.selectbox("Capacidade do novo aparelho", ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"], key="nova_cap")
+            nova_cap = st.selectbox(
+                "Capacidade",
+                ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"],
+                key="nova_cap",
+            )
         with c2:
-            novo_tipo = st.selectbox("Tipo do novo aparelho", ["Inverter", "Convencional"], key="novo_tipo")
-        novo_preco = st.number_input("Preço do novo aparelho", min_value=0.0, value=0.0, step=50.0, key="novo_preco")
-        if st.button("+ CRIAR NOVO APARELHO", use_container_width=True):
-            if not nova_marca.strip() or not novo_modelo.strip():
-                st.warning("Informe marca e modelo.")
+            novo_tipo = st.selectbox(
+                "Tipo",
+                ["Inverter", "Convencional"],
+                key="novo_tipo",
+            )
+
+        novo_preco = st.number_input(
+            "Preço estimado do aparelho (sem instalação)",
+            min_value=0.0,
+            value=0.0,
+            step=50.0,
+            key="novo_preco",
+        )
+        novo_ativo = st.checkbox(
+            "Criar já ativo para aparecer ao cliente",
+            value=True,
+            key="novo_ativo",
+        )
+
+        materiais_novo = [""] + [
+            n for n, m in config["materiais"].items()
+            if m.get("ativo") and m.get("unidade") == "metro"
+        ]
+        novo_material = st.selectbox(
+            "Tubulação/material por metro associado",
+            materiais_novo,
+            key="novo_material",
+            help="Opcional. Pode ser definido ou alterado depois.",
+        )
+
+        if st.button("+ CRIAR NOVO APARELHO", type="primary", use_container_width=True):
+            if not nova_marca.strip():
+                st.warning("Informe a marca do aparelho.")
             else:
                 chave = f"eq_{int(datetime.now().timestamp())}"
                 config["equipamentos"][chave] = {
-                    "ativo": True,
+                    "ativo": bool(novo_ativo),
                     "marca": nova_marca.strip(),
-                    "modelo": novo_modelo.strip(),
                     "capacidade": nova_cap,
                     "tipo": novo_tipo,
                     "preco": float(novo_preco),
-                    "material_metro": "",
+                    "material_metro": novo_material,
                     "permitir_metragem_cliente": True,
                 }
-                st.success("Aparelho criado. Clique em Salvar alterações no final do painel.")
-                st.rerun()
+                try:
+                    salvar_config_github(config)
+                    st.success("Aparelho criado e salvo.")
+                    st.rerun()
+                except Exception as erro:
+                    del config["equipamentos"][chave]
+                    st.error(f"Não foi possível criar o aparelho: {erro}")
 
     with tabs[4]:
         titulo_secao("Regras automáticas", "Defina adicionais e textos exibidos no orçamento.")
@@ -989,6 +1175,14 @@ def pagina_admin():
         config["empresa"]["nome"] = st.text_input("Nome", value=config["empresa"].get("nome", "F Climatização"))
         config["empresa"]["slogan"] = st.text_input("Slogan", value=config["empresa"].get("slogan", "Conforto em todas as estações"))
         config["empresa"]["whatsapp"] = st.text_input("WhatsApp", value=config["empresa"].get("whatsapp", ""), help="Código do país + DDD + número.")
+        config["empresa"]["cidade_base"] = st.text_input(
+            "Cidade base",
+            value=config["empresa"].get("cidade_base", "Não-Me-Toque/RS"),
+        )
+        config["empresa"]["regiao_texto"] = st.text_input(
+            "Texto da área de atendimento",
+            value=config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região"),
+        )
 
     st.divider()
     if st.button("💾 SALVAR ALTERAÇÕES DO SISTEMA", type="primary", use_container_width=True):
@@ -1009,6 +1203,7 @@ def pagina_admin():
 
 def pagina_cliente():
     cabecalho("cliente")
+    faixa_atendimento_whatsapp()
 
     st.markdown(
         '<div class="f-card-blue"><div class="f-card-title">Orçamento rápido e prático</div>'
@@ -1029,7 +1224,7 @@ def pagina_cliente():
             labels = []
             mapa = {}
             for k, e in equipamentos_ativos:
-                label = f"{e.get('marca','')} {e.get('modelo','')} - {e.get('capacidade','')} - {e.get('tipo','')} - {dinheiro(e.get('preco',0))}"
+                label = nome_equipamento(e)
                 labels.append(label)
                 mapa[label] = k
             escolha = st.selectbox("Escolha o aparelho", labels)
@@ -1185,7 +1380,7 @@ def pagina_cliente():
 
     st.markdown(
         '<div class="f-footer"><div class="f-footer-name">F CLIMATIZAÇÃO</div>'
-        '<div class="f-footer-sub">Conforto em todas as estações</div></div>',
+        f'<div class="f-footer-sub">{config["empresa"].get("regiao_texto", "Atendimento em Não-Me-Toque e região")}</div></div>',
         unsafe_allow_html=True,
     )
 
