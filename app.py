@@ -58,6 +58,36 @@ TIPOS_AR = ["Inverter", "Convencional"]
 UNIDADES_ITEM = ["unidade", "metro", "serviço", "equipamento"]
 FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
+REFERENCIA_AREA = {
+    "9.000 BTUs": "até 12 m²",
+    "12.000 BTUs": "13 a 19 m²",
+    "18.000 BTUs": "20 a 27 m²",
+    "24.000 BTUs": "28 a 37 m²",
+}
+
+BTU_NUM = {
+    "9.000 BTUs": 9000,
+    "12.000 BTUs": 12000,
+    "18.000 BTUs": 18000,
+    "24.000 BTUs": 24000,
+}
+
+AREA_MIN_BTU = {
+    "Até 12 m²": 9000,
+    "13 a 19 m²": 12000,
+    "20 a 27 m²": 18000,
+    "28 a 37 m²": 24000,
+}
+
+OPCOES_AREA = [
+    "Não sei",
+    "Até 12 m²",
+    "13 a 19 m²",
+    "20 a 27 m²",
+    "28 a 37 m²",
+    "Acima de 37 m²",
+]
+
 # =========================================================
 # VISUAL
 # =========================================================
@@ -195,6 +225,26 @@ hr{border-color:#243147!important;}
 .budget-number{
   display:inline-block;background:#ff7a00;color:#fff;font-weight:900;
   padding:5px 10px;border-radius:999px;font-size:12px;margin-bottom:8px;
+}
+.capacity-ok{
+  color:#45d483;
+  font-size:12px;
+  font-weight:750;
+  margin-top:6px;
+  line-height:1.35;
+}
+.capacity-warn{
+  color:#ffad42;
+  font-size:12px;
+  font-weight:750;
+  margin-top:6px;
+  line-height:1.35;
+}
+.capacity-note{
+  color:#8294aa;
+  font-size:10.5px;
+  margin-top:4px;
+  line-height:1.35;
 }
 @media(max-width:600px){
   .block-container{padding-left:.85rem;padding-right:.85rem;}
@@ -841,6 +891,59 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
     components.html(html, height=72)
 
 
+
+def mostrar_referencia_capacidade(capacidade):
+    if capacidade not in REFERENCIA_AREA:
+        return
+
+    referencia = REFERENCIA_AREA[capacidade]
+    st.markdown(
+        f'<div class="capacity-ok">Referência prática: {capacidade} — {referencia}.</div>'
+        '<div class="capacity-note">'
+        'O dimensionamento pode variar conforme sol, pessoas, eletrônicos, isolamento e características do ambiente.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def mostrar_compatibilidade_area(capacidade, area):
+    if not capacidade or capacidade not in BTU_NUM or area == "Não sei":
+        return
+
+    if area == "Acima de 37 m²":
+        st.markdown(
+            '<div class="capacity-warn">'
+            'Área acima da referência automática. Recomendamos confirmar o dimensionamento com a F Climatização.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    necessario = AREA_MIN_BTU.get(area)
+    escolhido = BTU_NUM.get(capacidade)
+
+    if necessario is None or escolhido is None:
+        return
+
+    if escolhido >= necessario:
+        st.markdown(
+            '<div class="capacity-ok">✓ Capacidade compatível com a área informada.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        recomendada = next(
+            (cap for cap, valor in BTU_NUM.items() if valor == necessario),
+            "capacidade superior",
+        )
+        st.markdown(
+            f'<div class="capacity-warn">'
+            f'⚠ A capacidade selecionada pode ser insuficiente para esta área. '
+            f'Referência mínima aproximada: {recomendada}.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 # =========================================================
 # EQUIPAMENTOS
 # =========================================================
@@ -1121,7 +1224,7 @@ def montar_item(descricao, quantidade, unidade, valor_unitario, origem="manual")
 # =========================================================
 
 def aba_orcamentos():
-    secao("Orçamentos", "Histórico permanente de orçamentos gerados pelo cliente.")
+    secao("Orçamentos", "Abra, ajuste itens e compartilhe novamente em PDF.")
 
     orcamentos = carregar_orcamentos()
 
@@ -1129,10 +1232,18 @@ def aba_orcamentos():
         st.info("Nenhum orçamento salvo ainda.")
         return
 
-    busca = st.text_input("Buscar por número, cliente ou telefone", key="buscar_orcamentos").strip().lower()
+    busca = st.text_input(
+        "Buscar por número, cliente ou telefone",
+        key="buscar_orcamentos",
+    ).strip().lower()
 
     filtrados = []
-    for o in sorted(orcamentos, key=lambda x: str(x.get("numero", "")), reverse=True):
+
+    for o in sorted(
+        orcamentos,
+        key=lambda x: str(x.get("numero", "")),
+        reverse=True,
+    ):
         texto = " ".join(
             [
                 str(o.get("numero", "")),
@@ -1140,6 +1251,7 @@ def aba_orcamentos():
                 str(o.get("cliente", {}).get("telefone", "")),
             ]
         ).lower()
+
         if not busca or busca in texto:
             filtrados.append(o)
 
@@ -1148,64 +1260,90 @@ def aba_orcamentos():
         nome = o.get("cliente", {}).get("nome", "Cliente")
         total = calcular_total(o.get("itens", []))
 
-        with st.expander(f"Orçamento {numero} • {nome} • {dinheiro(total)}"):
-            st.markdown(f'<span class="budget-number">#{numero}</span>', unsafe_allow_html=True)
-            st.write(f"**Data:** {o.get('data','')}")
-            st.write(f"**Cliente:** {nome}")
-            st.write(f"**Contato:** {o.get('cliente',{}).get('telefone','')}")
-            st.write(f"**Cidade:** {o.get('cliente',{}).get('cidade','')}")
+        with st.expander(
+            f"Orçamento {numero} • {nome} • {dinheiro(total)}"
+        ):
+            st.markdown(
+                f'<span class="budget-number">#{numero}</span>',
+                unsafe_allow_html=True,
+            )
 
-            st.markdown("#### Itens")
+            st.caption(
+                f"{o.get('data','')} • "
+                f"{o.get('cliente',{}).get('telefone','')} • "
+                f"{o.get('cliente',{}).get('cidade','')}"
+            )
+
+            st.markdown("#### Itens atuais")
 
             itens_editados = []
-            excluir_ids = []
 
             for idx, item in enumerate(o.get("itens", [])):
                 iid = item.get("id") or f"item{idx}"
-                with st.expander(item.get("descricao", f"Item {idx+1}")):
+
+                with st.expander(
+                    item.get("descricao", f"Item {idx + 1}")
+                ):
                     desc = st.text_input(
                         "Descrição",
                         value=item.get("descricao", ""),
                         key=f"orc_{numero}_{iid}_desc",
                     )
+
                     c1, c2 = st.columns(2)
+
                     with c1:
                         qtd = st.number_input(
                             "Quantidade",
                             min_value=0.0,
                             value=float(item.get("quantidade", 1) or 0),
-                            step=1.0 if item.get("unidade") != "metro" else 0.5,
+                            step=(
+                                0.5
+                                if item.get("unidade") == "metro"
+                                else 1.0
+                            ),
                             key=f"orc_{numero}_{iid}_qtd",
                         )
+
                     with c2:
-                        unidade_atual = item.get("unidade", "unidade")
+                        unidade_atual = item.get(
+                            "unidade",
+                            "unidade",
+                        )
+
                         if unidade_atual not in UNIDADES_ITEM:
                             unidade_atual = "unidade"
+
                         unidade = st.selectbox(
                             "Unidade",
                             UNIDADES_ITEM,
-                            index=UNIDADES_ITEM.index(unidade_atual),
+                            index=UNIDADES_ITEM.index(
+                                unidade_atual
+                            ),
                             key=f"orc_{numero}_{iid}_un",
                         )
 
                     vu = st.number_input(
                         "Valor unitário",
                         min_value=0.0,
-                        value=float(item.get("valor_unitario", 0) or 0),
+                        value=float(
+                            item.get("valor_unitario", 0) or 0
+                        ),
                         step=1.0,
                         key=f"orc_{numero}_{iid}_vu",
                     )
-                    st.caption(f"Total do item: {dinheiro(qtd * vu)}")
 
-                    apagar = st.checkbox(
-                        "Excluir este item",
+                    st.caption(
+                        f"Total: {dinheiro(qtd * vu)}"
+                    )
+
+                    remover = st.checkbox(
+                        "Remover do orçamento",
                         value=False,
                         key=f"orc_{numero}_{iid}_del",
                     )
 
-                    if apagar:
-                        excluir_ids.append(iid)
-                    else:
+                    if not remover:
                         itens_editados.append(
                             {
                                 "id": iid,
@@ -1213,36 +1351,230 @@ def aba_orcamentos():
                                 "quantidade": float(qtd),
                                 "unidade": unidade,
                                 "valor_unitario": float(vu),
-                                "origem": item.get("origem", "manual"),
+                                "origem": item.get(
+                                    "origem",
+                                    "manual",
+                                ),
                             }
                         )
 
-            st.markdown("#### Adicionar item")
-            novo_desc = st.text_input("Descrição do novo item", key=f"novo_desc_{numero}")
-            c1, c2 = st.columns(2)
-            with c1:
-                nova_qtd = st.number_input(
-                    "Quantidade do novo item",
-                    min_value=0.0,
-                    value=1.0,
-                    step=1.0,
-                    key=f"nova_qtd_{numero}",
-                )
-            with c2:
-                nova_un = st.selectbox(
-                    "Unidade do novo item",
-                    UNIDADES_ITEM,
-                    key=f"nova_un_{numero}",
-                )
-            novo_vu = st.number_input(
-                "Valor unitário do novo item",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key=f"novo_vu_{numero}",
-            )
+            # -------------------------------------------------
+            # NOVO ITEM
+            # -------------------------------------------------
 
-            adicionar = st.checkbox("Adicionar este novo item ao salvar", key=f"add_item_{numero}")
+            with st.expander("Adicionar item"):
+                tipo_item = st.radio(
+                    "Tipo",
+                    ["Material", "Serviço"],
+                    horizontal=True,
+                    key=f"novo_tipo_{numero}",
+                )
+
+                adicionar = False
+                item_novo = None
+                novo_material_catalogo = None
+
+                if tipo_item == "Material":
+                    origem_material = st.radio(
+                        "Material",
+                        ["Cadastrado", "Criar novo"],
+                        horizontal=True,
+                        key=f"origem_material_{numero}",
+                    )
+
+                    if origem_material == "Cadastrado":
+                        materiais_ativos = {
+                            nome_mat: dados_mat
+                            for nome_mat, dados_mat
+                            in config["materiais"].items()
+                            if dados_mat.get("ativo", True)
+                        }
+
+                        if not materiais_ativos:
+                            st.info(
+                                "Nenhum material ativo no catálogo."
+                            )
+                        else:
+                            nomes = list(
+                                materiais_ativos.keys()
+                            )
+
+                            escolhido = st.selectbox(
+                                "Escolha o material",
+                                nomes,
+                                key=f"mat_existente_{numero}",
+                            )
+
+                            dados_mat = materiais_ativos[
+                                escolhido
+                            ]
+
+                            unidade_mat = dados_mat.get(
+                                "unidade",
+                                "unidade",
+                            )
+
+                            if unidade_mat not in UNIDADES_ITEM:
+                                unidade_mat = "unidade"
+
+                            c1, c2 = st.columns(2)
+
+                            with c1:
+                                qtd_mat = st.number_input(
+                                    "Quantidade",
+                                    min_value=0.0,
+                                    value=1.0,
+                                    step=(
+                                        0.5
+                                        if unidade_mat == "metro"
+                                        else 1.0
+                                    ),
+                                    key=(
+                                        f"mat_qtd_{numero}_"
+                                        f"{escolhido}"
+                                    ),
+                                )
+
+                            with c2:
+                                valor_mat = st.number_input(
+                                    "Valor unitário",
+                                    min_value=0.0,
+                                    value=float(
+                                        dados_mat.get(
+                                            "preco",
+                                            0,
+                                        )
+                                        or 0
+                                    ),
+                                    step=1.0,
+                                    key=(
+                                        f"mat_preco_{numero}_"
+                                        f"{escolhido}"
+                                    ),
+                                )
+
+                            st.caption(
+                                f"Unidade: {unidade_mat} • "
+                                f"Total: "
+                                f"{dinheiro(qtd_mat * valor_mat)}"
+                            )
+
+                            adicionar = st.checkbox(
+                                "Adicionar este material ao salvar",
+                                key=f"add_mat_exist_{numero}",
+                            )
+
+                            if adicionar:
+                                item_novo = montar_item(
+                                    escolhido,
+                                    qtd_mat,
+                                    unidade_mat,
+                                    valor_mat,
+                                    origem="material",
+                                )
+
+                    else:
+                        novo_nome_mat = st.text_input(
+                            "Nome do novo material",
+                            key=f"novo_mat_orc_nome_{numero}",
+                        )
+
+                        c1, c2 = st.columns(2)
+
+                        with c1:
+                            nova_un_mat = st.selectbox(
+                                "Unidade",
+                                UNIDADES_ITEM,
+                                key=f"novo_mat_orc_un_{numero}",
+                            )
+
+                        with c2:
+                            novo_preco_mat = st.number_input(
+                                "Preço unitário",
+                                min_value=0.0,
+                                value=0.0,
+                                step=1.0,
+                                key=f"novo_mat_orc_preco_{numero}",
+                            )
+
+                        nova_qtd_mat = st.number_input(
+                            "Quantidade",
+                            min_value=0.0,
+                            value=1.0,
+                            step=(
+                                0.5
+                                if nova_un_mat == "metro"
+                                else 1.0
+                            ),
+                            key=f"novo_mat_orc_qtd_{numero}",
+                        )
+
+                        adicionar = st.checkbox(
+                            "Criar material e adicionar ao orçamento",
+                            key=f"add_novo_mat_{numero}",
+                        )
+
+                        if adicionar and novo_nome_mat.strip():
+                            nome_limpo = novo_nome_mat.strip()
+
+                            item_novo = montar_item(
+                                nome_limpo,
+                                nova_qtd_mat,
+                                nova_un_mat,
+                                novo_preco_mat,
+                                origem="material",
+                            )
+
+                            novo_material_catalogo = {
+                                "nome": nome_limpo,
+                                "dados": {
+                                    "unidade": nova_un_mat,
+                                    "preco": float(
+                                        novo_preco_mat
+                                    ),
+                                    "ativo": True,
+                                },
+                            }
+
+                else:
+                    desc_serv = st.text_input(
+                        "Descrição do serviço",
+                        key=f"novo_serv_desc_{numero}",
+                    )
+
+                    c1, c2 = st.columns(2)
+
+                    with c1:
+                        qtd_serv = st.number_input(
+                            "Quantidade",
+                            min_value=0.0,
+                            value=1.0,
+                            step=1.0,
+                            key=f"novo_serv_qtd_{numero}",
+                        )
+
+                    with c2:
+                        preco_serv = st.number_input(
+                            "Valor unitário",
+                            min_value=0.0,
+                            value=0.0,
+                            step=1.0,
+                            key=f"novo_serv_preco_{numero}",
+                        )
+
+                    adicionar = st.checkbox(
+                        "Adicionar este serviço ao salvar",
+                        key=f"add_serv_{numero}",
+                    )
+
+                    if adicionar and desc_serv.strip():
+                        item_novo = montar_item(
+                            desc_serv.strip(),
+                            qtd_serv,
+                            "serviço",
+                            preco_serv,
+                            origem="adm",
+                        )
 
             obs_edit = st.text_area(
                 "Observações do orçamento",
@@ -1251,47 +1583,101 @@ def aba_orcamentos():
             )
 
             total_prev = calcular_total(itens_editados)
-            if adicionar and novo_desc.strip():
-                total_prev += float(nova_qtd) * float(novo_vu)
 
-            st.metric("Total atualizado", dinheiro(total_prev))
+            if item_novo:
+                total_prev += (
+                    float(item_novo["quantidade"])
+                    * float(item_novo["valor_unitario"])
+                )
+
+            st.metric(
+                "Total atualizado",
+                dinheiro(total_prev),
+            )
 
             csave, cpdf = st.columns(2)
+
             with csave:
-                if st.button("Salvar orçamento", type="primary", key=f"salvar_orc_{numero}"):
+                if st.button(
+                    "Salvar orçamento",
+                    type="primary",
+                    key=f"salvar_orc_{numero}",
+                ):
                     novos_itens = itens_editados[:]
-                    if adicionar and novo_desc.strip():
-                        novos_itens.append(
-                            montar_item(novo_desc.strip(), nova_qtd, nova_un, novo_vu, origem="adm")
-                        )
+
+                    if item_novo:
+                        novos_itens.append(item_novo)
+
+                    # Novo material criado dentro do orçamento
+                    # também é salvo no catálogo.
+                    if novo_material_catalogo:
+                        nome_mat = novo_material_catalogo[
+                            "nome"
+                        ]
+                        config["materiais"][
+                            nome_mat
+                        ] = novo_material_catalogo["dados"]
 
                     for original in orcamentos:
                         if original.get("numero") == numero:
                             original["itens"] = novos_itens
-                            original["observacoes"] = obs_edit
-                            original["atualizado_em"] = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M")
+                            original[
+                                "observacoes"
+                            ] = obs_edit
+                            original[
+                                "atualizado_em"
+                            ] = datetime.now(
+                                FUSO_BRASILIA
+                            ).strftime(
+                                "%d/%m/%Y %H:%M"
+                            )
                             break
 
                     try:
-                        salvar_orcamentos(orcamentos)
-                        st.success("Orçamento atualizado e salvo.")
+                        if novo_material_catalogo:
+                            salvar_config()
+
+                        salvar_orcamentos(
+                            orcamentos
+                        )
+
+                        st.success(
+                            "Orçamento atualizado e salvo."
+                        )
                         st.rerun()
+
                     except Exception as e:
-                        st.error(f"Erro ao salvar orçamento: {e}")
+                        st.error(
+                            f"Erro ao salvar orçamento: {e}"
+                        )
 
             with cpdf:
                 orc_pdf = copy.deepcopy(o)
                 orc_pdf["itens"] = itens_editados[:]
-                if adicionar and novo_desc.strip():
+
+                if item_novo:
                     orc_pdf["itens"].append(
-                        montar_item(novo_desc.strip(), nova_qtd, nova_un, novo_vu, origem="adm")
+                        item_novo
                     )
-                orc_pdf["observacoes"] = obs_edit
-                pdf_bytes = gerar_pdf(orc_pdf)
+
+                orc_pdf[
+                    "observacoes"
+                ] = obs_edit
+
+                pdf_bytes = gerar_pdf(
+                    orc_pdf
+                )
+
                 compartilhar_pdf(
                     pdf_bytes,
-                    f"orcamento_{numero}_F_Climatizacao.pdf",
-                    titulo=f"Orçamento {numero} - F Climatização",
+                    (
+                        f"orcamento_{numero}_"
+                        f"F_Climatizacao.pdf"
+                    ),
+                    titulo=(
+                        f"Orçamento {numero} "
+                        f"- F Climatização"
+                    ),
                 )
 
 
@@ -1338,65 +1724,103 @@ def aba_servicos():
 def aba_materiais():
     secao(
         "Materiais",
-        "Catálogo interno. Estes itens não aparecem automaticamente para o cliente.",
+        "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
     st.info(
-        "Materiais podem ser adicionados manualmente a um orçamento pelo ADM com quantidade, unidade e valor."
+        "Os materiais já cadastrados são mantidos no catálogo e podem ser renomeados. "
+        "Itens inativos deixam de aparecer nas opções de inclusão em novos orçamentos."
     )
 
-    remover = []
-    for nome, dados in list(config["materiais"].items()):
+    reconstruidos = {}
+
+    for idx, (nome, dados) in enumerate(list(config["materiais"].items())):
         with st.expander(nome):
+            novo_nome = st.text_input(
+                "Nome / descrição",
+                value=nome,
+                key=f"mat_nome_{idx}_{nome}",
+            ).strip()
+
             dados["ativo"] = st.checkbox(
                 "Ativo",
                 value=bool(dados.get("ativo", True)),
-                key=f"mat_ativo_{nome}",
+                key=f"mat_ativo_{idx}_{nome}",
             )
+
             unidade = dados.get("unidade", "metro")
             if unidade not in UNIDADES_ITEM:
                 unidade = "metro"
+
             dados["unidade"] = st.selectbox(
                 "Unidade",
                 UNIDADES_ITEM,
                 index=UNIDADES_ITEM.index(unidade),
-                key=f"mat_un_{nome}",
+                key=f"mat_un_{idx}_{nome}",
             )
+
             dados["preco"] = st.number_input(
                 "Preço de venda",
                 min_value=0.0,
                 value=float(dados.get("preco", 0) or 0),
                 step=1.0,
-                key=f"mat_val_{nome}",
+                key=f"mat_val_{idx}_{nome}",
             )
-            if st.checkbox("Excluir material", key=f"mat_del_{nome}"):
-                remover.append(nome)
 
-    for nome in remover:
-        config["materiais"].pop(nome, None)
+            chave_final = novo_nome or nome
 
-    st.markdown("#### Criar material")
-    novo_nome = st.text_input("Nome do material", key="novo_mat_nome")
-    c1, c2 = st.columns(2)
-    with c1:
-        novo_un = st.selectbox("Unidade", UNIDADES_ITEM, key="novo_mat_un")
-    with c2:
-        novo_preco = st.number_input(
-            "Preço",
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-            key="novo_mat_preco",
-        )
-    if st.button("Adicionar material", key="add_mat"):
-        if novo_nome.strip():
-            config["materiais"][novo_nome.strip()] = {
-                "unidade": novo_un,
-                "preco": float(novo_preco),
-                "ativo": True,
-            }
-            st.success("Material adicionado. Use Salvar alterações.")
-            st.rerun()
+            # Evita sobrescrever silenciosamente outro material com o mesmo nome.
+            if chave_final in reconstruidos and chave_final != nome:
+                st.warning(
+                    "Já existe outro material com esse nome. "
+                    "Use um nome diferente antes de salvar."
+                )
+                chave_final = nome
+
+            reconstruidos[chave_final] = dados
+
+    config["materiais"] = reconstruidos
+
+    with st.expander("Adicionar novo material"):
+        novo_nome = st.text_input("Nome do material", key="novo_mat_nome")
+        c1, c2 = st.columns(2)
+
+        with c1:
+            novo_un = st.selectbox(
+                "Unidade",
+                UNIDADES_ITEM,
+                key="novo_mat_un",
+            )
+
+        with c2:
+            novo_preco = st.number_input(
+                "Preço",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key="novo_mat_preco",
+            )
+
+        if st.button("Adicionar ao catálogo", key="add_mat"):
+            nome_limpo = novo_nome.strip()
+
+            if not nome_limpo:
+                st.warning("Informe o nome do material.")
+            elif nome_limpo in config["materiais"]:
+                st.warning("Já existe um material com esse nome.")
+            else:
+                config["materiais"][nome_limpo] = {
+                    "unidade": novo_un,
+                    "preco": float(novo_preco),
+                    "ativo": True,
+                }
+
+                try:
+                    salvar_config()
+                    st.success("Material criado e salvo.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar material: {e}")
 
 
 # =========================================================
@@ -1662,6 +2086,8 @@ def pagina_cliente():
             equipamento = config["equipamentos"][equipamento_id]
             capacidade = equipamento.get("capacidade", "9.000 BTUs")
 
+            mostrar_referencia_capacidade(capacidade)
+
             st.caption(
                 f"Preço-base do equipamento: {dinheiro(equipamento.get('preco', 0))}"
             )
@@ -1681,6 +2107,8 @@ def pagina_cliente():
                 CAPACIDADES,
                 key="cliente_capacidade_compra",
             )
+            mostrar_referencia_capacidade(capacidade)
+
             st.info(
                 "Nenhum aparelho está disponível no catálogo no momento. "
                 "A equipe confirmará as opções pelo WhatsApp."
@@ -1693,6 +2121,7 @@ def pagina_cliente():
             opcoes_capacidade,
             key="cliente_capacidade",
         )
+        mostrar_referencia_capacidade(capacidade)
 
     secao("Serviços", "Selecione um ou mais serviços.")
 
@@ -1735,20 +2164,17 @@ def pagina_cliente():
             key="cliente_andar",
         )
 
-    opcoes_area = [
-        "Não sei",
-        "Até 10 m²",
-        "11 a 15 m²",
-        "16 a 20 m²",
-        "21 a 30 m²",
-        "Mais de 30 m²",
-    ]
-    garantir_opcao_valida("cliente_area", opcoes_area)
+    garantir_opcao_valida("cliente_area", OPCOES_AREA)
 
     area = st.selectbox(
         "Tamanho aproximado do ambiente",
-        opcoes_area,
+        OPCOES_AREA,
         key="cliente_area",
+    )
+
+    mostrar_compatibilidade_area(
+        capacidade if capacidade in CAPACIDADES else None,
+        area,
     )
 
     secao(
