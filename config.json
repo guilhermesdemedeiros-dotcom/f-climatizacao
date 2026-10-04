@@ -1,0 +1,166 @@
+{
+  "empresa": {
+    "nome": "F Climatização",
+    "slogan": "Seu ambiente na temperatura ideal",
+    "whatsapp": "5555999999999"
+  },
+  "servicos": {
+    "Instalação": {
+      "icone": "🛠️",
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Instalação padrão de ar-condicionado Split.",
+      "precos": {
+        "9.000 BTUs": 100.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
+    },
+    "Higienização": {
+      "icone": "🧼",
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Limpeza e higienização do aparelho.",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
+    },
+    "Manutenção": {
+      "icone": "🔧",
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Avaliação e manutenção do equipamento.",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
+    },
+    "Desinstalação": {
+      "icone": "📦",
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Retirada do aparelho instalado.",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
+    },
+    "Reinstalação": {
+      "icone": "♻️",
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Reinstalação de aparelho já existente.",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
+    }
+  },
+  "adicionais": {
+    "Apartamento": {
+      "mostrar_cliente": true,
+      "descricao": "Instalação ou serviço em apartamento.",
+      "preco": 0.0
+    },
+    "Instalação em altura": {
+      "mostrar_cliente": true,
+      "descricao": "Local que pode exigir trabalho em altura.",
+      "preco": 0.0
+    },
+    "Acesso difícil": {
+      "mostrar_cliente": true,
+      "descricao": "Local com acesso mais complexo.",
+      "preco": 0.0
+    },
+    "Retirada de aparelho antigo": {
+      "mostrar_cliente": true,
+      "descricao": "Existe aparelho antigo para retirada.",
+      "preco": 0.0
+    },
+    "Pode precisar de material adicional": {
+      "mostrar_cliente": true,
+      "descricao": "Tubulação, cabo, canaleta ou outros materiais adicionais.",
+      "preco": 0.0
+    },
+    "Adequação ou reparo": {
+      "mostrar_cliente": true,
+      "descricao": "Pode ser necessária alguma adequação ou reparo.",
+      "preco": 0.0
+    }
+  },
+  "materiais": {
+    "Tubo de cobre 1/4\"": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Tubo de cobre 3/8\"": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Tubo de cobre 1/2\"": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Tubo de cobre 5/8\"": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Tubo de cobre 3/4\"": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Canaleta": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Cabo elétrico": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Mangueira de dreno": {
+      "unidade": "metro",
+      "preco": 0.0,
+      "ativo": true
+    },
+    "Suporte para condensadora": {
+      "unidade": "unidade",
+      "preco": 0.0,
+      "ativo": true
+    }
+  },
+  "equipamentos": {
+    "Split 9.000 BTUs": {
+      "preco": 0.0,
+      "ativo": false
+    },
+    "Split 12.000 BTUs": {
+      "preco": 0.0,
+      "ativo": false
+    },
+    "Split 18.000 BTUs": {
+      "preco": 0.0,
+      "ativo": false
+    },
+    "Split 24.000 BTUs": {
+      "preco": 0.0,
+      "ativo": false
+    }
+  }
+}
