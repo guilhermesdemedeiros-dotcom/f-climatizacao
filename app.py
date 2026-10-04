@@ -268,6 +268,8 @@ DEFAULT_CONFIG = {
         "whatsapp": "5555999999999",
         "local_atendimento": "Não-Me-Toque/RS",
         "texto_atendimento": "Atendimento em Não-Me-Toque e região",
+        "endereco": "",
+        "cnpj": "",
     },
     "servicos": {
         "Instalação": {
@@ -1021,13 +1023,27 @@ def gerar_pdf(orcamento):
             logo_flow = ""
 
     empresa = config["empresa"]
+    empresa_linhas = [
+        f"<b>{empresa.get('nome','F Climatização')}</b>",
+    ]
+
+    if empresa.get("slogan"):
+        empresa_linhas.append(f"<font size='8'>{empresa.get('slogan','')}</font>")
+
+    if empresa.get("endereco"):
+        empresa_linhas.append(f"<font size='8'>{empresa.get('endereco','')}</font>")
+
+    if empresa.get("cnpj"):
+        empresa_linhas.append(f"<font size='8'>CNPJ: {empresa.get('cnpj','')}</font>")
+
+    if empresa.get("texto_atendimento"):
+        empresa_linhas.append(f"<font size='8'>{empresa.get('texto_atendimento','')}</font>")
+
     cab_dados = [
         [
             logo_flow,
             Paragraph(
-                f"<b>{empresa.get('nome','F Climatização')}</b><br/>"
-                f"<font size='8'>{empresa.get('slogan','')}</font><br/>"
-                f"<font size='8'>{empresa.get('texto_atendimento','')}</font>",
+                "<br/>".join(empresa_linhas),
                 title_style,
             ),
             Paragraph(
@@ -1962,6 +1978,16 @@ def aba_empresa():
     emp["texto_atendimento"] = st.text_input(
         "Texto da área de atendimento",
         value=emp.get("texto_atendimento", "Atendimento em Não-Me-Toque e região"),
+    )
+    emp["endereco"] = st.text_input(
+        "Endereço",
+        value=emp.get("endereco", ""),
+        placeholder="Rua, número, bairro, cidade/UF",
+    )
+    emp["cnpj"] = st.text_input(
+        "CNPJ",
+        value=emp.get("cnpj", ""),
+        placeholder="00.000.000/0000-00",
     )
 
 
