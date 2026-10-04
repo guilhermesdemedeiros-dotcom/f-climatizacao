@@ -2,17 +2,19 @@
   "empresa": {
     "nome": "F Climatização",
     "slogan": "Seu ambiente na temperatura ideal.",
-    "whatsapp": "5554991666600"
+    "whatsapp": "5554991666600",
+    "cidade_base": "Não-Me-Toque/RS",
+    "regiao_texto": "Atendimento em Não-Me-Toque e região"
   },
   "servicos": {
     "Instalação": {
       "icone": "🛠️",
       "ativo": true,
       "mostrar_cliente": true,
-      "descricao": "Instalação padrão de ar-condicionado Split.",
+      "descricao": "Instalação padrão de ar-condicionado.",
       "precos": {
         "9.000 BTUs": 100.0,
-        "12.000 BTUs": 0.0,
+        "12.000 BTUs": 280.0,
         "18.000 BTUs": 0.0,
         "24.000 BTUs": 0.0
       }
