@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 import base64
 import urllib.request
@@ -557,6 +558,114 @@ def secao(titulo, subtitulo=""):
     )
 
 
+
+def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatização"):
+    """
+    Tenta abrir o compartilhamento nativo do celular com o PDF anexado.
+    Se o navegador/iframe não permitir Web Share com arquivos, oferece download como fallback.
+    """
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+    html = f"""
+    <style>
+      body {{
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      .wrap {{
+        width: 100%;
+      }}
+      button {{
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid #1891ff;
+        border-radius: 14px;
+        background: linear-gradient(90deg,#0758b9,#0878e8);
+        color: #fff;
+        font-size: 15px;
+        font-weight: 800;
+        cursor: pointer;
+        padding: 11px 14px;
+      }}
+      .fallback {{
+        display: none;
+        margin-top: 8px;
+        text-align: center;
+        font-size: 12px;
+        color: #9caec4;
+      }}
+      .fallback a {{
+        color: #46a9ff;
+        font-weight: 700;
+        text-decoration: none;
+      }}
+    </style>
+
+    <div class="wrap">
+      <button id="shareBtn" type="button">COMPARTILHAR PDF</button>
+      <div id="fallback" class="fallback">
+        O compartilhamento direto não está disponível neste navegador.
+        <a id="downloadLink" download="{nome_arquivo}">Baixar PDF</a>
+      </div>
+    </div>
+
+    <script>
+      const b64 = "{pdf_b64}";
+      const fileName = {json.dumps(nome_arquivo)};
+      const shareTitle = {json.dumps(titulo)};
+
+      function base64ToBlob(base64, type) {{
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {{
+          bytes[i] = binary.charCodeAt(i);
+        }}
+        return new Blob([bytes], {{ type }});
+      }}
+
+      const blob = base64ToBlob(b64, "application/pdf");
+      const file = new File([blob], fileName, {{ type: "application/pdf" }});
+      const btn = document.getElementById("shareBtn");
+      const fallback = document.getElementById("fallback");
+      const downloadLink = document.getElementById("downloadLink");
+
+      const objectUrl = URL.createObjectURL(blob);
+      downloadLink.href = objectUrl;
+
+      btn.addEventListener("click", async () => {{
+        try {{
+          if (
+            navigator.share &&
+            navigator.canShare &&
+            navigator.canShare({{ files: [file] }})
+          ) {{
+            await navigator.share({{
+              title: shareTitle,
+              text: "Orçamento em PDF da F Climatização",
+              files: [file]
+            }});
+          }} else {{
+            fallback.style.display = "block";
+            downloadLink.click();
+          }}
+        }} catch (err) {{
+          if (err && err.name === "AbortError") {{
+            return;
+          }}
+          fallback.style.display = "block";
+        }}
+      }});
+
+      window.addEventListener("beforeunload", () => URL.revokeObjectURL(objectUrl));
+    </script>
+    """
+
+    components.html(html, height=72)
+
+
 # =========================================================
 # EQUIPAMENTOS
 # =========================================================
@@ -982,13 +1091,10 @@ def aba_orcamentos():
                     )
                 orc_pdf["observacoes"] = obs_edit
                 pdf_bytes = gerar_pdf(orc_pdf)
-                st.download_button(
-                    "Baixar PDF",
-                    data=pdf_bytes,
-                    file_name=f"orcamento_{numero}_F_Climatizacao.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key=f"pdf_{numero}",
+                compartilhar_pdf(
+                    pdf_bytes,
+                    f"orcamento_{numero}_F_Climatizacao.pdf",
+                    titulo=f"Orçamento {numero} - F Climatização",
                 )
 
 
@@ -1553,13 +1659,10 @@ def pagina_cliente():
         )
 
         pdf = gerar_pdf(ultimo)
-        st.download_button(
-            "BAIXAR ORÇAMENTO EM PDF",
-            data=pdf,
-            file_name=f"orcamento_{numero}_F_Climatizacao.pdf",
-            mime="application/pdf",
-            type="primary",
-            use_container_width=True,
+        compartilhar_pdf(
+            pdf,
+            f"orcamento_{numero}_F_Climatizacao.pdf",
+            titulo=f"Orçamento {numero} - F Climatização",
         )
 
         mensagem = (
@@ -1569,9 +1672,13 @@ def pagina_cliente():
         )
 
         st.link_button(
-            "FALAR PELO WHATSAPP",
+            "ENVIAR MENSAGEM PARA A F CLIMATIZAÇÃO",
             link_whatsapp(mensagem),
             use_container_width=True,
+        )
+
+        st.caption(
+            "Para enviar o PDF pelo WhatsApp, toque em Compartilhar PDF e escolha o WhatsApp na folha de compartilhamento do celular."
         )
 
     st.markdown(
