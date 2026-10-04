@@ -6,7 +6,9 @@
     "cidade_base": "Não-Me-Toque/RS",
     "regiao_texto": "Atendimento em Não-Me-Toque e região",
     "local_atendimento": "Não-Me-Toque/RS",
-    "texto_atendimento": "Atendimento em Não-Me-Toque e região"
+    "texto_atendimento": "Atendimento em Não-Me-Toque e região",
+    "endereco": "Luis Rudy Becker, 284",
+    "cnpj": "57.484.042/0001-62"
   },
   "servicos": {
     "Instalação": {
