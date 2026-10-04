@@ -15,7 +15,7 @@
       "mostrar_cliente": true,
       "descricao": "Instalação padrão de ar-condicionado.",
       "precos": {
-        "9.000 BTUs": 100.0,
+        "9.000 BTUs": 280.0,
         "12.000 BTUs": 280.0,
         "18.000 BTUs": 350.0,
         "24.000 BTUs": 400.0
@@ -27,10 +27,10 @@
       "mostrar_cliente": true,
       "descricao": "Limpeza e higienização do aparelho.",
       "precos": {
-        "9.000 BTUs": 0.0,
-        "12.000 BTUs": 0.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
+        "9.000 BTUs": 130.0,
+        "12.000 BTUs": 150.0,
+        "18.000 BTUs": 160.0,
+        "24.000 BTUs": 180.0
       }
     },
     "Desinstalação": {
