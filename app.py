@@ -4,15 +4,203 @@ import base64
 import urllib.request
 import urllib.error
 from urllib.parse import quote
+import os
 
 st.set_page_config(
     page_title="F Climatização",
     page_icon="❄️",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 # =========================================================
-# CONFIGURAÇÃO DO GITHUB
+# IDENTIDADE VISUAL
+# =========================================================
+
+st.markdown("""
+<style>
+
+.stApp {
+    background:
+        radial-gradient(circle at top right, rgba(0,119,255,.10), transparent 32%),
+        linear-gradient(180deg, #F7FAFF 0%, #FFFFFF 38%, #F7FAFF 100%);
+}
+
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+.block-container {
+    max-width: 760px;
+    padding-top: 1.2rem;
+    padding-bottom: 3rem;
+}
+
+h1, h2, h3 {
+    color: #062B63 !important;
+}
+
+p, label {
+    line-height: 1.45;
+}
+
+.f-header {
+    background: linear-gradient(135deg, #031D46 0%, #063A82 60%, #0878E8 100%);
+    border-radius: 24px;
+    padding: 22px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 12px 30px rgba(3, 29, 70, .18);
+    position: relative;
+    overflow: hidden;
+}
+
+.f-header:after {
+    content: "";
+    position: absolute;
+    width: 190px;
+    height: 190px;
+    border-radius: 50%;
+    border: 22px solid rgba(255,122,0,.18);
+    right: -85px;
+    top: -90px;
+}
+
+.f-brand {
+    font-size: 28px;
+    font-weight: 900;
+    color: white;
+    letter-spacing: .4px;
+    margin: 0;
+}
+
+.f-brand span {
+    color: #FF7A00;
+}
+
+.f-slogan {
+    color: #DDEBFF;
+    font-size: 14px;
+    margin-top: 3px;
+}
+
+.f-badge {
+    display: inline-block;
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.18);
+    color: white;
+    border-radius: 999px;
+    padding: 6px 11px;
+    margin-top: 13px;
+    font-size: 12px;
+}
+
+.section-title {
+    font-size: 19px;
+    font-weight: 800;
+    color: #062B63;
+    margin-top: 22px;
+    margin-bottom: 4px;
+}
+
+.section-subtitle {
+    font-size: 13px;
+    color: #64748B;
+    margin-bottom: 12px;
+}
+
+.info-card {
+    background: white;
+    border: 1px solid #E3EAF4;
+    border-left: 4px solid #0878E8;
+    border-radius: 16px;
+    padding: 14px 15px;
+    margin: 12px 0;
+    box-shadow: 0 5px 16px rgba(6,43,99,.05);
+}
+
+.warning-card {
+    background: #FFF8EF;
+    border: 1px solid #FFE0B7;
+    border-left: 4px solid #FF7A00;
+    border-radius: 16px;
+    padding: 14px 15px;
+    margin: 14px 0;
+    color: #563000;
+}
+
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div {
+    border-radius: 12px !important;
+}
+
+div[data-testid="stTextInput"] input,
+div[data-testid="stTextArea"] textarea,
+div[data-testid="stNumberInput"] input {
+    border-radius: 12px !important;
+}
+
+.stButton > button {
+    width: 100%;
+    border-radius: 14px;
+    min-height: 48px;
+    font-weight: 800;
+    transition: all .15s ease;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(90deg, #063A82, #0878E8);
+    border: 0;
+    color: white;
+    box-shadow: 0 7px 18px rgba(8,120,232,.20);
+}
+
+.stButton > button[kind="primary"]:hover {
+    border: 0;
+    transform: translateY(-1px);
+}
+
+.stLinkButton > a {
+    border-radius: 14px !important;
+    min-height: 50px;
+    font-weight: 800 !important;
+    background: #12B76A !important;
+    color: white !important;
+    border: none !important;
+}
+
+div[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid #DDE7F4;
+    border-radius: 18px;
+    padding: 15px;
+    box-shadow: 0 6px 18px rgba(6,43,99,.06);
+}
+
+div[data-testid="stExpander"] {
+    border: 1px solid #DDE7F4;
+    border-radius: 14px;
+    overflow: hidden;
+    background: white;
+}
+
+button[data-baseweb="tab"] {
+    font-weight: 700;
+}
+
+.f-footer {
+    margin-top: 38px;
+    padding-top: 18px;
+    border-top: 1px solid #E5EAF1;
+    text-align: center;
+    color: #8A97A8;
+    font-size: 12px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================================================
+# GITHUB
 # =========================================================
 
 GITHUB_OWNER = "guilhermesdemedeiros-dotcom"
@@ -31,7 +219,7 @@ ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
 DEFAULT_CONFIG = {
     "empresa": {
         "nome": "F Climatização",
-        "slogan": "Seu ambiente na temperatura ideal",
+        "slogan": "Conforto em todas as estações",
         "whatsapp": "5555999999999"
     },
 
@@ -49,7 +237,7 @@ DEFAULT_CONFIG = {
             }
         },
         "Higienização": {
-            "icone": "🧼",
+            "icone": "✨",
             "ativo": True,
             "mostrar_cliente": True,
             "descricao": "Limpeza e higienização do aparelho.",
@@ -121,7 +309,7 @@ DEFAULT_CONFIG = {
         },
         "Pode precisar de material adicional": {
             "mostrar_cliente": True,
-            "descricao": "Tubulação, cabo, canaleta ou outros materiais adicionais.",
+            "descricao": "Pode haver necessidade de material adicional.",
             "preco": 0.0
         },
         "Adequação ou reparo": {
@@ -132,82 +320,40 @@ DEFAULT_CONFIG = {
     },
 
     "materiais": {
-        'Tubo de cobre 1/4"': {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        'Tubo de cobre 3/8"': {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        'Tubo de cobre 1/2"': {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        'Tubo de cobre 5/8"': {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        'Tubo de cobre 3/4"': {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        "Canaleta": {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        "Cabo elétrico": {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        "Mangueira de dreno": {
-            "unidade": "metro",
-            "preco": 0.0,
-            "ativo": True
-        },
-        "Suporte para condensadora": {
-            "unidade": "unidade",
-            "preco": 0.0,
-            "ativo": True
-        }
+        'Tubo de cobre 1/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 3/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 1/2"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 5/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        'Tubo de cobre 3/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Canaleta": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Cabo elétrico": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Mangueira de dreno": {"unidade": "metro", "preco": 0.0, "ativo": True},
+        "Suporte para condensadora": {"unidade": "unidade", "preco": 0.0, "ativo": True}
     },
 
     "equipamentos": {
-        "Split 9.000 BTUs": {
-            "preco": 0.0,
-            "ativo": False
-        },
-        "Split 12.000 BTUs": {
-            "preco": 0.0,
-            "ativo": False
-        },
-        "Split 18.000 BTUs": {
-            "preco": 0.0,
-            "ativo": False
-        },
-        "Split 24.000 BTUs": {
-            "preco": 0.0,
-            "ativo": False
-        }
+        "Split 9.000 BTUs": {"preco": 0.0, "ativo": False},
+        "Split 12.000 BTUs": {"preco": 0.0, "ativo": False},
+        "Split 18.000 BTUs": {"preco": 0.0, "ativo": False},
+        "Split 24.000 BTUs": {"preco": 0.0, "ativo": False}
     }
 }
 
 
 # =========================================================
-# ARQUIVO LOCAL
+# CARREGAMENTO
 # =========================================================
 
 def carregar_config():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
-            return json.load(arquivo)
+            dados = json.load(arquivo)
+
+            if "slogan" not in dados.get("empresa", {}):
+                dados["empresa"]["slogan"] = "Conforto em todas as estações"
+
+            return dados
+
     except Exception:
         return DEFAULT_CONFIG.copy()
 
@@ -216,10 +362,11 @@ config = carregar_config()
 
 
 # =========================================================
-# SALVAR NO GITHUB
+# GITHUB API
 # =========================================================
 
 def github_request(url, method="GET", data=None):
+
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
@@ -291,7 +438,7 @@ def salvar_config_github(nova_config):
 
 
 # =========================================================
-# FUNÇÕES
+# UTILIDADES
 # =========================================================
 
 def dinheiro(valor):
@@ -305,13 +452,83 @@ def dinheiro(valor):
 
 def link_whatsapp(texto):
     numero = "".join(
-        c for c in config["empresa"]["whatsapp"]
+        c for c in config["empresa"].get("whatsapp", "")
         if c.isdigit()
     )
 
-    return (
-        f"https://wa.me/{numero}"
-        f"?text={quote(texto)}"
+    return f"https://wa.me/{numero}?text={quote(texto)}"
+
+
+def cabecalho(area="cliente"):
+
+    col_logo, col_texto = st.columns(
+        [1, 2.8],
+        vertical_alignment="center"
+    )
+
+    with col_logo:
+
+        if os.path.exists("logo.PNG"):
+            st.image(
+                "logo.PNG",
+                use_container_width=True
+            )
+        else:
+            st.markdown(
+                "<div style='font-size:55px;text-align:center'>❄️</div>",
+                unsafe_allow_html=True
+            )
+
+    with col_texto:
+
+        if area == "admin":
+            titulo = "PAINEL ADMINISTRATIVO"
+            subtitulo = "Gestão • F Climatização"
+        else:
+            titulo = "F CLIMATIZAÇÃO"
+            subtitulo = config["empresa"].get(
+                "slogan",
+                "Conforto em todas as estações"
+            )
+
+        st.markdown(
+            f"""
+            <div style="
+                background:linear-gradient(135deg,#031D46,#0759B5);
+                padding:18px;
+                border-radius:18px;
+                box-shadow:0 8px 22px rgba(3,29,70,.15);
+            ">
+                <div style="
+                    color:white;
+                    font-weight:900;
+                    font-size:21px;
+                    line-height:1.15;
+                ">
+                    {titulo}
+                </div>
+
+                <div style="
+                    color:#FF8A00;
+                    font-weight:700;
+                    margin-top:5px;
+                    font-size:13px;
+                ">
+                    {subtitulo}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def titulo_secao(titulo, subtitulo=""):
+    st.markdown(
+        f"""
+        <div class="section-title">{titulo}</div>
+        <div class="section-subtitle">{subtitulo}</div>
+        """,
+        unsafe_allow_html=True
     )
 
 
@@ -321,27 +538,44 @@ def link_whatsapp(texto):
 
 def pagina_admin():
 
-    st.title("⚙️ Painel Administrativo")
-    st.caption("F Climatização")
+    cabecalho("admin")
+
+    if st.button(
+        "← Voltar para área do cliente",
+        use_container_width=True
+    ):
+        st.session_state["pagina"] = "cliente"
+        st.rerun()
 
     if not ADMIN_KEY:
-        st.error("ADMIN_KEY não configurada nos Secrets.")
+        st.error(
+            "ADMIN_KEY não configurada nos Secrets."
+        )
         return
 
-    if not st.session_state.get("admin_logado"):
+    if not st.session_state.get(
+        "admin_logado",
+        False
+    ):
+
+        titulo_secao(
+            "🔐 Acesso administrativo",
+            "Digite sua senha para continuar."
+        )
 
         senha = st.text_input(
-            "Senha do administrador",
-            type="password"
+            "Senha",
+            type="password",
+            placeholder="Senha do administrador"
         )
 
         if st.button(
-            "Entrar",
+            "Entrar no painel",
             type="primary",
             use_container_width=True
         ):
             if senha == ADMIN_KEY:
-                st.session_state.admin_logado = True
+                st.session_state["admin_logado"] = True
                 st.rerun()
             else:
                 st.error("Senha incorreta.")
@@ -358,26 +592,28 @@ def pagina_admin():
         "Empresa"
     ])
 
-    # -----------------------------------------------------
-    # SERVIÇOS
-    # -----------------------------------------------------
-
     with tab1:
 
-        st.subheader("Serviços")
+        titulo_secao(
+            "Serviços",
+            "Defina disponibilidade e valores."
+        )
 
         for nome, dados in config["servicos"].items():
 
             with st.expander(nome):
 
                 dados["ativo"] = st.checkbox(
-                    "Ativo",
-                    value=dados.get("ativo", True),
+                    "Serviço ativo",
+                    value=dados.get(
+                        "ativo",
+                        True
+                    ),
                     key=f"serv_ativo_{nome}"
                 )
 
                 dados["mostrar_cliente"] = st.checkbox(
-                    "Mostrar ao cliente",
+                    "Mostrar para o cliente",
                     value=dados.get(
                         "mostrar_cliente",
                         True
@@ -394,7 +630,9 @@ def pagina_admin():
                     key=f"serv_desc_{nome}"
                 )
 
-                st.markdown("**Preços**")
+                st.markdown(
+                    "**Valores por capacidade**"
+                )
 
                 for capacidade in [
                     "9.000 BTUs",
@@ -421,20 +659,19 @@ def pagina_admin():
                         )
                     )
 
-    # -----------------------------------------------------
-    # ADICIONAIS
-    # -----------------------------------------------------
-
     with tab2:
 
-        st.subheader("Situações adicionais")
+        titulo_secao(
+            "Situações adicionais",
+            "Configure situações que podem alterar o orçamento."
+        )
 
         for nome, dados in config["adicionais"].items():
 
             with st.expander(nome):
 
                 dados["mostrar_cliente"] = st.checkbox(
-                    "Mostrar ao cliente",
+                    "Mostrar para o cliente",
                     value=dados.get(
                         "mostrar_cliente",
                         True
@@ -455,32 +692,40 @@ def pagina_admin():
                     "Valor adicional",
                     min_value=0.0,
                     value=float(
-                        dados.get("preco", 0)
+                        dados.get(
+                            "preco",
+                            0
+                        )
                     ),
                     step=10.0,
                     key=f"adic_preco_{nome}"
                 )
 
-    # -----------------------------------------------------
-    # MATERIAIS
-    # -----------------------------------------------------
-
     with tab3:
 
-        st.subheader("Materiais")
+        titulo_secao(
+            "Materiais",
+            "Controle técnico e preços de venda."
+        )
 
         st.info(
-            "Estes itens são controlados pelo ADM. "
+            "Os materiais técnicos ficam no ADM. "
             "O cliente não precisa escolher bitolas "
-            "ou materiais técnicos."
+            "ou componentes."
         )
+
+        unidades = [
+            "metro",
+            "unidade",
+            "serviço"
+        ]
 
         for nome, dados in config["materiais"].items():
 
             with st.expander(nome):
 
                 dados["ativo"] = st.checkbox(
-                    "Ativo",
+                    "Material ativo",
                     value=dados.get(
                         "ativo",
                         True
@@ -488,33 +733,19 @@ def pagina_admin():
                     key=f"mat_ativo_{nome}"
                 )
 
+                unidade_atual = dados.get(
+                    "unidade",
+                    "metro"
+                )
+
+                if unidade_atual not in unidades:
+                    unidade_atual = "metro"
+
                 dados["unidade"] = st.selectbox(
-                    "Cobrança",
-                    [
-                        "metro",
-                        "unidade",
-                        "serviço"
-                    ],
-                    index=(
-                        [
-                            "metro",
-                            "unidade",
-                            "serviço"
-                        ].index(
-                            dados.get(
-                                "unidade",
-                                "metro"
-                            )
-                        )
-                        if dados.get(
-                            "unidade",
-                            "metro"
-                        ) in [
-                            "metro",
-                            "unidade",
-                            "serviço"
-                        ]
-                        else 0
+                    "Unidade de cobrança",
+                    unidades,
+                    index=unidades.index(
+                        unidade_atual
                     ),
                     key=f"mat_unidade_{nome}"
                 )
@@ -523,19 +754,21 @@ def pagina_admin():
                     "Preço de venda",
                     min_value=0.0,
                     value=float(
-                        dados.get("preco", 0)
+                        dados.get(
+                            "preco",
+                            0
+                        )
                     ),
                     step=1.0,
                     key=f"mat_preco_{nome}"
                 )
 
-    # -----------------------------------------------------
-    # APARELHOS
-    # -----------------------------------------------------
-
     with tab4:
 
-        st.subheader("Aparelhos para venda")
+        titulo_secao(
+            "Aparelhos",
+            "Equipamentos disponíveis para venda."
+        )
 
         for nome, dados in config["equipamentos"].items():
 
@@ -551,37 +784,41 @@ def pagina_admin():
                 )
 
                 dados["preco"] = st.number_input(
-                    "Preço do aparelho",
+                    "Preço de venda",
                     min_value=0.0,
                     value=float(
-                        dados.get("preco", 0)
+                        dados.get(
+                            "preco",
+                            0
+                        )
                     ),
                     step=50.0,
                     key=f"equip_preco_{nome}"
                 )
 
-    # -----------------------------------------------------
-    # EMPRESA
-    # -----------------------------------------------------
-
     with tab5:
 
-        st.subheader("Empresa")
+        titulo_secao(
+            "Empresa",
+            "Informações utilizadas no orçamento."
+        )
 
         config["empresa"]["nome"] = st.text_input(
-            "Nome",
+            "Nome da empresa",
             value=config["empresa"].get(
                 "nome",
                 "F Climatização"
-            )
+            ),
+            key="empresa_nome"
         )
 
         config["empresa"]["slogan"] = st.text_input(
             "Slogan",
             value=config["empresa"].get(
                 "slogan",
-                ""
-            )
+                "Conforto em todas as estações"
+            ),
+            key="empresa_slogan"
         )
 
         config["empresa"]["whatsapp"] = st.text_input(
@@ -590,10 +827,8 @@ def pagina_admin():
                 "whatsapp",
                 ""
             ),
-            help=(
-                "Use código do país + DDD + número. "
-                "Exemplo: 5554999999999"
-            )
+            help="Código do país + DDD + número.",
+            key="empresa_whatsapp"
         )
 
     st.divider()
@@ -606,17 +841,13 @@ def pagina_admin():
 
         try:
 
-            with st.spinner("Salvando..."):
-
+            with st.spinner(
+                "Salvando alterações..."
+            ):
                 salvar_config_github(config)
 
             st.success(
-                "✅ Alterações salvas permanentemente!"
-            )
-
-            st.info(
-                "O Streamlit pode reiniciar o aplicativo "
-                "automaticamente para carregar a nova configuração."
+                "✅ Alterações salvas permanentemente."
             )
 
         except Exception as erro:
@@ -626,10 +857,11 @@ def pagina_admin():
             )
 
     if st.button(
-        "Sair do ADM",
+        "🔒 Sair do administrador",
         use_container_width=True
     ):
-        st.session_state.admin_logado = False
+        st.session_state["admin_logado"] = False
+        st.session_state["pagina"] = "cliente"
         st.rerun()
 
 
@@ -639,13 +871,23 @@ def pagina_admin():
 
 def pagina_cliente():
 
-    empresa = config["empresa"]
-
-    st.title(f"❄️ {empresa['nome']}")
-    st.caption(empresa["slogan"])
+    cabecalho("cliente")
 
     st.markdown(
-        "### Solicite seu orçamento"
+        """
+        <div class="info-card">
+            <strong>Orçamento rápido e prático</strong><br>
+            <span style="color:#64748B;font-size:13px;">
+            Informe os dados abaixo para receber uma estimativa inicial.
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    titulo_secao(
+        "❄️ Seu aparelho",
+        "Conte primeiro qual é a sua necessidade."
     )
 
     possui = st.radio(
@@ -657,35 +899,45 @@ def pagina_cliente():
         ]
     )
 
-    capacidades = [
-        "9.000 BTUs",
-        "12.000 BTUs",
-        "18.000 BTUs",
-        "24.000 BTUs",
-        "Não sei"
-    ]
-
     capacidade = st.selectbox(
-        "Qual a capacidade do aparelho?",
-        capacidades
+        "Qual a capacidade?",
+        [
+            "9.000 BTUs",
+            "12.000 BTUs",
+            "18.000 BTUs",
+            "24.000 BTUs",
+            "Não sei"
+        ]
     )
 
-    servicos_disponiveis = []
+    titulo_secao(
+        "🛠️ Serviço",
+        "Selecione o que você precisa."
+    )
 
-    for nome, dados in config["servicos"].items():
-
-        if (
-            dados.get("ativo", True)
-            and dados.get(
-                "mostrar_cliente",
-                True
-            )
-        ):
-            servicos_disponiveis.append(nome)
+    servicos_disponiveis = [
+        nome
+        for nome, dados
+        in config["servicos"].items()
+        if dados.get(
+            "ativo",
+            True
+        )
+        and dados.get(
+            "mostrar_cliente",
+            True
+        )
+    ]
 
     servicos = st.multiselect(
-        "Qual serviço você precisa?",
-        servicos_disponiveis
+        "Serviço desejado",
+        servicos_disponiveis,
+        placeholder="Selecione um ou mais serviços"
+    )
+
+    titulo_secao(
+        "🏠 Ambiente",
+        "Essas informações ajudam a entender o serviço."
     )
 
     tipo_imovel = st.selectbox(
@@ -710,7 +962,10 @@ def pagina_cliente():
         ]
     )
 
-    st.markdown("### Sobre o local")
+    titulo_secao(
+        "📋 Sobre o local",
+        "Marque somente o que se aplicar."
+    )
 
     situacoes = []
 
@@ -728,25 +983,64 @@ def pagina_cliente():
                 situacoes.append(nome)
 
     observacoes = st.text_area(
-        "Observações",
+        "Alguma observação?",
         placeholder=(
-            "Conte aqui qualquer detalhe "
-            "que possa ajudar no orçamento."
+            "Ex.: acesso, local da instalação "
+            "ou alguma necessidade específica."
         )
     )
 
-    st.markdown("### Seus dados")
+    aparelho_escolhido = None
+
+    if possui == "Não, quero comprar":
+
+        titulo_secao(
+            "🧊 Aparelhos disponíveis",
+            "Confira os equipamentos disponíveis."
+        )
+
+        equipamentos_ativos = [
+            nome
+            for nome, dados
+            in config["equipamentos"].items()
+            if dados.get(
+                "ativo",
+                False
+            )
+        ]
+
+        if equipamentos_ativos:
+
+            aparelho_escolhido = st.selectbox(
+                "Aparelho",
+                equipamentos_ativos
+            )
+
+        else:
+
+            st.info(
+                "Consulte a F Climatização sobre "
+                "os aparelhos disponíveis."
+            )
+
+    titulo_secao(
+        "👤 Seus dados",
+        "Usaremos essas informações somente para o atendimento."
+    )
 
     nome_cliente = st.text_input(
-        "Nome"
+        "Nome",
+        placeholder="Seu nome"
     )
 
     telefone = st.text_input(
-        "Telefone / WhatsApp"
+        "Telefone / WhatsApp",
+        placeholder="Seu telefone"
     )
 
     cidade = st.text_input(
-        "Cidade"
+        "Cidade",
+        placeholder="Sua cidade"
     )
 
     total = 0.0
@@ -757,9 +1051,9 @@ def pagina_cliente():
         for servico in servicos:
 
             valor = float(
-                config["servicos"][servico][
-                    "precos"
-                ].get(
+                config["servicos"][
+                    servico
+                ]["precos"].get(
                     capacidade,
                     0
                 )
@@ -784,97 +1078,83 @@ def pagina_cliente():
             total += valor
             tem_valor = True
 
-    aparelho_escolhido = None
+    if aparelho_escolhido:
 
-    if possui == "Não, quero comprar":
-
-        st.markdown("### Aparelhos disponíveis")
-
-        equipamentos_ativos = [
-            nome
-            for nome, dados
-            in config["equipamentos"].items()
-            if dados.get("ativo", False)
-        ]
-
-        if equipamentos_ativos:
-
-            aparelho_escolhido = st.selectbox(
-                "Escolha o aparelho",
-                equipamentos_ativos
+        preco_aparelho = float(
+            config["equipamentos"][
+                aparelho_escolhido
+            ].get(
+                "preco",
+                0
             )
+        )
 
-            preco_aparelho = float(
-                config["equipamentos"][
-                    aparelho_escolhido
-                ].get(
-                    "preco",
-                    0
-                )
-            )
+        if preco_aparelho > 0:
+            total += preco_aparelho
+            tem_valor = True
 
-            if preco_aparelho > 0:
-                total += preco_aparelho
-                tem_valor = True
-
-        else:
-            st.info(
-                "Consulte a F Climatização "
-                "sobre aparelhos disponíveis."
-            )
-
-    st.divider()
+    st.write("")
 
     if st.button(
-        "Calcular orçamento",
+        "CALCULAR ORÇAMENTO",
         type="primary",
         use_container_width=True
     ):
 
         if not servicos:
+
             st.warning(
                 "Selecione pelo menos um serviço."
             )
 
         else:
 
-            st.subheader("Resumo do orçamento")
+            titulo_secao(
+                "💰 Sua estimativa",
+                "Resumo das informações selecionadas."
+            )
 
             for servico in servicos:
-
                 st.write(
-                    f"• {servico}"
+                    f"✓ {servico}"
                 )
 
             if aparelho_escolhido:
                 st.write(
-                    f"• {aparelho_escolhido}"
+                    f"✓ {aparelho_escolhido}"
                 )
 
             if tem_valor:
+
                 st.metric(
                     "Estimativa inicial",
                     dinheiro(total)
                 )
+
             else:
+
                 st.info(
-                    "O valor será confirmado pela "
-                    "F Climatização após avaliar "
+                    "O valor será confirmado após avaliarmos "
                     "as informações do serviço."
                 )
 
-            st.warning(
-                "A estimativa considera as condições "
-                "informadas. Caso sejam necessários "
-                "materiais adicionais, tubulação extra, "
-                "adequações elétricas, reparos ou trabalho "
-                "especial, o valor será informado antes. "
-                "Nada será acrescentado sem sua aprovação."
+            st.markdown(
+                """
+                <div class="warning-card">
+                    <strong>Importante</strong><br>
+                    Esta é uma estimativa inicial. Caso sejam necessários
+                    materiais adicionais, tubulação extra, adequações,
+                    reparos ou condições especiais de instalação,
+                    informaremos o valor antes da execução.
+                    <strong>Nada será acrescentado sem sua aprovação.</strong>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
             mensagem = (
                 f"Olá! Gostaria de solicitar um orçamento "
-                f"com a {empresa['nome']}.\n\n"
+                f"com a {config['empresa']['nome']}.\n\n"
                 f"Nome: {nome_cliente}\n"
                 f"Telefone: {telefone}\n"
                 f"Cidade: {cidade}\n"
@@ -887,7 +1167,7 @@ def pagina_cliente():
 
             if situacoes:
                 mensagem += (
-                    "Situações informadas: "
+                    "Situações: "
                     + ", ".join(situacoes)
                     + "\n"
                 )
@@ -900,7 +1180,8 @@ def pagina_cliente():
 
             if observacoes:
                 mensagem += (
-                    f"Observações: {observacoes}\n"
+                    f"Observações: "
+                    f"{observacoes}\n"
                 )
 
             if tem_valor:
@@ -910,34 +1191,77 @@ def pagina_cliente():
                 )
 
             st.link_button(
-                "📲 Enviar pelo WhatsApp",
+                "📲 SOLICITAR PELO WHATSAPP",
                 link_whatsapp(mensagem),
                 use_container_width=True
             )
 
-            st.info(
-                "📷 Para agilizar o orçamento, envie pelo "
-                "WhatsApp fotos do local da evaporadora e "
-                "da condensadora e, se possível, uma foto "
-                "da etiqueta/modelo do aparelho."
+            st.markdown(
+                """
+                <div class="info-card">
+                    <strong>📷 Agilize seu atendimento</strong><br>
+                    <span style="color:#64748B;font-size:13px;">
+                    Envie pelo WhatsApp fotos do local onde ficarão
+                    as unidades interna e externa. Se já possui o
+                    aparelho, envie também uma foto da etiqueta/modelo.
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-    st.markdown("### Observações importantes")
-
-    st.caption(
-        "Serviços, materiais ou condições que não estejam "
-        "listados podem ser adicionados ao orçamento após "
-        "avaliação e aprovação do cliente."
+    titulo_secao(
+        "ℹ️ Observações importantes"
     )
 
+    st.caption(
+        "Se o serviço, material ou condição necessária não estiver "
+        "listada, fale conosco pelo WhatsApp. Qualquer adicional será "
+        "informado antes e dependerá da aprovação do cliente."
+    )
+
+    st.markdown(
+        """
+        <div class="f-footer">
+            <strong>F CLIMATIZAÇÃO</strong><br>
+            Conforto em todas as estações
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.write("")
+
+    with st.expander(
+        "🔐 Área administrativa"
+    ):
+
+        st.caption(
+            "Acesso exclusivo para administração."
+        )
+
+        if st.button(
+            "Acessar painel administrativo",
+            use_container_width=True
+        ):
+            st.session_state["pagina"] = "admin"
+            st.rerun()
+
 
 # =========================================================
-# ROTEAMENTO
+# NAVEGAÇÃO
 # =========================================================
 
-modo = st.query_params.get("modo", "")
+if "pagina" not in st.session_state:
+    st.session_state["pagina"] = "cliente"
 
-if modo == "admin":
+if st.query_params.get(
+    "modo",
+    ""
+) == "admin":
+    st.session_state["pagina"] = "admin"
+
+if st.session_state["pagina"] == "admin":
     pagina_admin()
 else:
     pagina_cliente()
