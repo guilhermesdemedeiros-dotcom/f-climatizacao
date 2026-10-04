@@ -108,7 +108,7 @@
     },
     "Suporte para condensadora": {
       "unidade": "unidade",
-      "preco": 60.0,
+      "preco": 50.0,
       "ativo": true,
       "mostrar_cliente": true
     }
