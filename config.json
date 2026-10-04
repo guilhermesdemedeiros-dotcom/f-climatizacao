@@ -60,25 +60,25 @@
   "materiais": {
     "Tubo de cobre 1/4\"": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 22.0,
       "ativo": true,
       "mostrar_cliente": false
     },
     "Tubo de cobre 3/8\"": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 35.0,
       "ativo": true,
       "mostrar_cliente": false
     },
     "Tubo de cobre 1/2\"": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 48.0,
       "ativo": true,
       "mostrar_cliente": false
     },
     "Tubo de cobre 5/8\"": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 60.0,
       "ativo": true,
       "mostrar_cliente": false
     },
@@ -90,25 +90,25 @@
     },
     "Canaleta": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 45.0,
       "ativo": true,
       "mostrar_cliente": true
     },
     "Cabo elétrico": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 20.0,
       "ativo": true,
       "mostrar_cliente": false
     },
     "Mangueira de dreno": {
       "unidade": "metro",
-      "preco": 0.0,
+      "preco": 5.0,
       "ativo": true,
       "mostrar_cliente": false
     },
     "Suporte para condensadora": {
       "unidade": "unidade",
-      "preco": 0.0,
+      "preco": 60.0,
       "ativo": true,
       "mostrar_cliente": true
     }
