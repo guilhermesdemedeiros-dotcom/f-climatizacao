@@ -157,16 +157,6 @@
     }
   },
   "equipamentos": {
-    "Split 9.000 BTUs": {
-      "preco": 0.0,
-      "ativo": false,
-      "marca": "",
-      "modelo": "",
-      "capacidade": "9.000 BTUs",
-      "tipo": "Inverter",
-      "material_metro": "",
-      "permitir_metragem_cliente": true
-    },
     "Split 12.000 BTUs": {
       "preco": 0.0,
       "ativo": false,
