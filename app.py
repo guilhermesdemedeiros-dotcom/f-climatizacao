@@ -5,6 +5,11 @@ import urllib.request
 import urllib.error
 from urllib.parse import quote
 import os
+import copy
+
+# =========================================================
+# PÁGINA
+# =========================================================
 
 st.set_page_config(
     page_title="F Climatização",
@@ -17,187 +22,431 @@ st.set_page_config(
 # IDENTIDADE VISUAL
 # =========================================================
 
-st.markdown("""
+st.markdown(
+    """
 <style>
+:root {
+    --f-bg: #070A0F;
+    --f-card: #0E131C;
+    --f-card2: #111A27;
+    --f-blue-dark: #062B63;
+    --f-blue: #0878E8;
+    --f-blue-light: #22A7FF;
+    --f-orange: #FF7A00;
+    --f-orange-light: #FF9D21;
+    --f-white: #FFFFFF;
+    --f-muted: #AAB6C8;
+    --f-border: #243247;
+}
+
+html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html, body {
+    background: #070A0F;
+}
 
 .stApp {
     background:
-        radial-gradient(circle at top right, rgba(0,119,255,.10), transparent 32%),
-        linear-gradient(180deg, #F7FAFF 0%, #FFFFFF 38%, #F7FAFF 100%);
+        radial-gradient(circle at top right, rgba(8,120,232,.13), transparent 28%),
+        radial-gradient(circle at top left, rgba(255,122,0,.06), transparent 20%),
+        linear-gradient(180deg, #070A0F 0%, #090D14 55%, #070A0F 100%);
+    color: #FFFFFF;
 }
 
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
+/* Esconde itens padrão */
+#MainMenu {
+    visibility: hidden;
+}
 
+footer {
+    visibility: hidden;
+}
+
+/* Área principal */
 .block-container {
     max-width: 760px;
-    padding-top: 1.2rem;
-    padding-bottom: 3rem;
+    padding-top: 1rem;
+    padding-bottom: 4rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
 }
 
-h1, h2, h3 {
-    color: #062B63 !important;
+/* Textos */
+h1, h2, h3, h4, h5, h6 {
+    color: #FFFFFF !important;
 }
 
-p, label {
-    line-height: 1.45;
+p,
+span,
+label {
+    color: #FFFFFF;
 }
 
-.f-header {
-    background: linear-gradient(135deg, #031D46 0%, #063A82 60%, #0878E8 100%);
-    border-radius: 24px;
-    padding: 22px 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 12px 30px rgba(3, 29, 70, .18);
-    position: relative;
-    overflow: hidden;
+div[data-testid="stMarkdownContainer"] p {
+    color: #FFFFFF;
 }
 
-.f-header:after {
-    content: "";
-    position: absolute;
-    width: 190px;
-    height: 190px;
-    border-radius: 50%;
-    border: 22px solid rgba(255,122,0,.18);
-    right: -85px;
-    top: -90px;
-}
-
-.f-brand {
-    font-size: 28px;
-    font-weight: 900;
-    color: white;
-    letter-spacing: .4px;
-    margin: 0;
-}
-
-.f-brand span {
-    color: #FF7A00;
-}
-
-.f-slogan {
-    color: #DDEBFF;
-    font-size: 14px;
-    margin-top: 3px;
-}
-
-.f-badge {
-    display: inline-block;
-    background: rgba(255,255,255,.12);
-    border: 1px solid rgba(255,255,255,.18);
-    color: white;
-    border-radius: 999px;
-    padding: 6px 11px;
-    margin-top: 13px;
-    font-size: 12px;
-}
-
-.section-title {
-    font-size: 19px;
-    font-weight: 800;
-    color: #062B63;
-    margin-top: 22px;
-    margin-bottom: 4px;
-}
-
-.section-subtitle {
-    font-size: 13px;
-    color: #64748B;
+/* Cabeçalho */
+.brand-box {
+    background:
+        linear-gradient(135deg, rgba(6,43,99,.96), rgba(8,120,232,.82)),
+        #0E131C;
+    border: 1px solid rgba(34,167,255,.35);
+    border-radius: 22px;
+    padding: 18px 18px;
+    box-shadow:
+        0 14px 35px rgba(0,0,0,.35),
+        0 0 35px rgba(8,120,232,.07);
     margin-bottom: 12px;
 }
 
-.info-card {
-    background: white;
-    border: 1px solid #E3EAF4;
-    border-left: 4px solid #0878E8;
-    border-radius: 16px;
-    padding: 14px 15px;
-    margin: 12px 0;
-    box-shadow: 0 5px 16px rgba(6,43,99,.05);
+.brand-title {
+    font-size: 24px;
+    line-height: 1.05;
+    font-weight: 900;
+    color: #FFFFFF;
+    letter-spacing: .3px;
 }
 
-.warning-card {
-    background: #FFF8EF;
-    border: 1px solid #FFE0B7;
-    border-left: 4px solid #FF7A00;
-    border-radius: 16px;
-    padding: 14px 15px;
+.brand-title-accent {
+    color: #FF8A00;
+}
+
+.brand-subtitle {
+    color: #BFD7F5;
+    font-size: 13px;
+    margin-top: 7px;
+    font-weight: 500;
+}
+
+.brand-admin {
+    color: #FF9D21;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .8px;
+    margin-bottom: 5px;
+}
+
+/* Cards */
+.f-card {
+    background: linear-gradient(180deg, #101722 0%, #0D131C 100%);
+    border: 1px solid #243247;
+    border-radius: 18px;
+    padding: 16px;
     margin: 14px 0;
-    color: #563000;
+    box-shadow: 0 10px 25px rgba(0,0,0,.20);
 }
 
-div[data-baseweb="select"] > div,
+.f-card-blue {
+    background: linear-gradient(135deg, rgba(6,43,99,.40), rgba(14,19,28,.95));
+    border: 1px solid rgba(8,120,232,.42);
+    border-left: 4px solid #0878E8;
+    border-radius: 18px;
+    padding: 16px;
+    margin: 14px 0;
+}
+
+.f-card-orange {
+    background: linear-gradient(135deg, rgba(255,122,0,.13), rgba(14,19,28,.96));
+    border: 1px solid rgba(255,122,0,.32);
+    border-left: 4px solid #FF7A00;
+    border-radius: 18px;
+    padding: 16px;
+    margin: 14px 0;
+}
+
+.f-card-title {
+    color: #FFFFFF;
+    font-weight: 850;
+    font-size: 16px;
+    margin-bottom: 4px;
+}
+
+.f-card-text {
+    color: #AAB6C8;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Títulos */
+.section-wrap {
+    margin-top: 27px;
+    margin-bottom: 12px;
+}
+
+.section-title {
+    color: #FFFFFF;
+    font-size: 20px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.section-title span {
+    color: #FF8A00;
+}
+
+.section-subtitle {
+    color: #8FA1B7;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+/* Divisor */
+hr {
+    border-color: #233044 !important;
+}
+
+/* Labels de formulário */
+div[data-testid="stWidgetLabel"] p {
+    color: #FFFFFF !important;
+    font-weight: 650 !important;
+}
+
+div[data-testid="stRadio"] label,
+div[data-testid="stCheckbox"] label {
+    color: #FFFFFF !important;
+}
+
+div[data-testid="stRadio"] p,
+div[data-testid="stCheckbox"] p {
+    color: #FFFFFF !important;
+}
+
+/* Radio buttons */
+div[data-testid="stRadio"] {
+    background: #0D131C;
+    border: 1px solid #243247;
+    border-radius: 16px;
+    padding: 12px 14px;
+}
+
+div[data-testid="stRadio"] label > div:first-child {
+    border-color: #0878E8 !important;
+}
+
+/* Checkbox */
+div[data-testid="stCheckbox"] {
+    background: #0D131C;
+    border: 1px solid #202D3E;
+    border-radius: 12px;
+    padding: 7px 10px;
+    margin-bottom: 5px;
+}
+
+/* Inputs */
+div[data-baseweb="select"] > div {
+    background-color: #111722 !important;
+    border-color: #2A3A51 !important;
+    border-radius: 13px !important;
+    color: white !important;
+}
+
+div[data-baseweb="select"] span {
+    color: #FFFFFF !important;
+}
+
 div[data-baseweb="input"] > div {
-    border-radius: 12px !important;
+    background-color: #111722 !important;
+    border-color: #2A3A51 !important;
+    border-radius: 13px !important;
+}
+
+input {
+    color: #FFFFFF !important;
+    caret-color: #FF7A00 !important;
+}
+
+textarea {
+    color: #FFFFFF !important;
+    background-color: #111722 !important;
+    border-color: #2A3A51 !important;
+    border-radius: 13px !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #74859A !important;
 }
 
 div[data-testid="stTextInput"] input,
-div[data-testid="stTextArea"] textarea,
 div[data-testid="stNumberInput"] input {
-    border-radius: 12px !important;
+    background: #111722 !important;
+    border-radius: 13px !important;
 }
 
+ul[role="listbox"] {
+    background: #111722 !important;
+}
+
+li[role="option"] {
+    color: white !important;
+}
+
+/* Multiselect */
+div[data-baseweb="tag"] {
+    background-color: #0878E8 !important;
+}
+
+div[data-baseweb="tag"] span {
+    color: #FFFFFF !important;
+}
+
+/* Botões */
 .stButton > button {
     width: 100%;
+    min-height: 49px;
     border-radius: 14px;
-    min-height: 48px;
     font-weight: 800;
-    transition: all .15s ease;
+    background: #111722;
+    color: #FFFFFF;
+    border: 1px solid #2A3A51;
+}
+
+.stButton > button:hover {
+    border-color: #0878E8;
+    color: #FFFFFF;
 }
 
 .stButton > button[kind="primary"] {
-    background: linear-gradient(90deg, #063A82, #0878E8);
-    border: 0;
-    color: white;
-    box-shadow: 0 7px 18px rgba(8,120,232,.20);
+    background: linear-gradient(90deg, #0755B2 0%, #0878E8 100%);
+    color: #FFFFFF;
+    border: 1px solid #188EFC;
+    box-shadow: 0 8px 20px rgba(8,120,232,.22);
 }
 
 .stButton > button[kind="primary"]:hover {
-    border: 0;
-    transform: translateY(-1px);
+    background: linear-gradient(90deg, #0878E8 0%, #1496FF 100%);
+    color: #FFFFFF;
 }
 
+/* WhatsApp */
 .stLinkButton > a {
+    background: linear-gradient(90deg, #0AAE64, #14C879) !important;
+    color: #FFFFFF !important;
+    border: 0 !important;
     border-radius: 14px !important;
-    min-height: 50px;
-    font-weight: 800 !important;
-    background: #12B76A !important;
-    color: white !important;
-    border: none !important;
+    min-height: 51px !important;
+    font-weight: 850 !important;
 }
 
+/* Métrica */
 div[data-testid="stMetric"] {
-    background: white;
-    border: 1px solid #DDE7F4;
+    background:
+        linear-gradient(135deg, rgba(8,120,232,.18), rgba(14,19,28,.95));
+    border: 1px solid rgba(8,120,232,.45);
     border-radius: 18px;
-    padding: 15px;
-    box-shadow: 0 6px 18px rgba(6,43,99,.06);
+    padding: 17px;
 }
 
+div[data-testid="stMetric"] label {
+    color: #AFC9E9 !important;
+}
+
+div[data-testid="stMetricValue"] {
+    color: #FFFFFF !important;
+}
+
+div[data-testid="stMetricValue"] > div {
+    color: #FFFFFF !important;
+}
+
+/* Expanders */
 div[data-testid="stExpander"] {
-    border: 1px solid #DDE7F4;
-    border-radius: 14px;
+    background: #0D131C;
+    border: 1px solid #243247;
+    border-radius: 15px;
     overflow: hidden;
-    background: white;
 }
 
-button[data-baseweb="tab"] {
+div[data-testid="stExpander"] details summary p {
+    color: #FFFFFF !important;
     font-weight: 700;
 }
 
-.f-footer {
-    margin-top: 38px;
-    padding-top: 18px;
-    border-top: 1px solid #E5EAF1;
-    text-align: center;
-    color: #8A97A8;
-    font-size: 12px;
+/* Tabs */
+div[data-baseweb="tab-list"] {
+    gap: 6px;
 }
 
-</style>
-""", unsafe_allow_html=True)
+button[data-baseweb="tab"] {
+    color: #9AAABD !important;
+    font-weight: 750;
+}
 
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #FFFFFF !important;
+}
+
+div[data-baseweb="tab-highlight"] {
+    background-color: #FF7A00 !important;
+}
+
+/* Alertas */
+div[data-testid="stAlert"] {
+    border-radius: 14px;
+}
+
+/* Caption */
+div[data-testid="stCaptionContainer"] p {
+    color: #8FA1B7 !important;
+}
+
+/* Rodapé */
+.f-footer {
+    margin-top: 38px;
+    border-top: 1px solid #1D2A3C;
+    padding: 22px 5px 0 5px;
+    text-align: center;
+}
+
+.f-footer-name {
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: .8px;
+}
+
+.f-footer-sub {
+    color: #74859A;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.orange {
+    color: #FF7A00 !important;
+}
+
+.blue {
+    color: #22A7FF !important;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+
+    .block-container {
+        padding-left: .9rem;
+        padding-right: .9rem;
+        padding-top: .7rem;
+    }
+
+    .brand-title {
+        font-size: 20px;
+    }
+
+    .brand-subtitle {
+        font-size: 12px;
+    }
+
+    .section-title {
+        font-size: 18px;
+    }
+}
+</style>
+""",
+    unsafe_allow_html=True
+)
 
 # =========================================================
 # GITHUB
@@ -211,7 +460,6 @@ CONFIG_FILE = "config.json"
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
 
-
 # =========================================================
 # CONFIGURAÇÃO PADRÃO
 # =========================================================
@@ -219,10 +467,9 @@ ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
 DEFAULT_CONFIG = {
     "empresa": {
         "nome": "F Climatização",
-        "slogan": "Conforto em todas as estações",
+        "slogan": "Seu ambiente na temperatura ideal",
         "whatsapp": "5555999999999"
     },
-
     "servicos": {
         "Instalação": {
             "icone": "🛠️",
@@ -285,7 +532,6 @@ DEFAULT_CONFIG = {
             }
         }
     },
-
     "adicionais": {
         "Apartamento": {
             "mostrar_cliente": True,
@@ -318,48 +564,106 @@ DEFAULT_CONFIG = {
             "preco": 0.0
         }
     },
-
     "materiais": {
-        'Tubo de cobre 1/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
-        'Tubo de cobre 3/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
-        'Tubo de cobre 1/2"': {"unidade": "metro", "preco": 0.0, "ativo": True},
-        'Tubo de cobre 5/8"': {"unidade": "metro", "preco": 0.0, "ativo": True},
-        'Tubo de cobre 3/4"': {"unidade": "metro", "preco": 0.0, "ativo": True},
-        "Canaleta": {"unidade": "metro", "preco": 0.0, "ativo": True},
-        "Cabo elétrico": {"unidade": "metro", "preco": 0.0, "ativo": True},
-        "Mangueira de dreno": {"unidade": "metro", "preco": 0.0, "ativo": True},
-        "Suporte para condensadora": {"unidade": "unidade", "preco": 0.0, "ativo": True}
+        'Tubo de cobre 1/4"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 3/8"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 1/2"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 5/8"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        'Tubo de cobre 3/4"': {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Canaleta": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Cabo elétrico": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Mangueira de dreno": {
+            "unidade": "metro",
+            "preco": 0.0,
+            "ativo": True
+        },
+        "Suporte para condensadora": {
+            "unidade": "unidade",
+            "preco": 0.0,
+            "ativo": True
+        }
     },
-
     "equipamentos": {
-        "Split 9.000 BTUs": {"preco": 0.0, "ativo": False},
-        "Split 12.000 BTUs": {"preco": 0.0, "ativo": False},
-        "Split 18.000 BTUs": {"preco": 0.0, "ativo": False},
-        "Split 24.000 BTUs": {"preco": 0.0, "ativo": False}
+        "Split 9.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 12.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 18.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        },
+        "Split 24.000 BTUs": {
+            "preco": 0.0,
+            "ativo": False
+        }
     }
 }
 
+# =========================================================
+# FUNÇÕES DE CONFIGURAÇÃO
+# =========================================================
 
-# =========================================================
-# CARREGAMENTO
-# =========================================================
+def completar_config(base, padrao):
+    if not isinstance(base, dict):
+        return copy.deepcopy(padrao)
+
+    resultado = copy.deepcopy(base)
+
+    for chave, valor in padrao.items():
+        if chave not in resultado:
+            resultado[chave] = copy.deepcopy(valor)
+
+        elif isinstance(valor, dict):
+            resultado[chave] = completar_config(
+                resultado[chave],
+                valor
+            )
+
+    return resultado
+
 
 def carregar_config():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
             dados = json.load(arquivo)
-
-            if "slogan" not in dados.get("empresa", {}):
-                dados["empresa"]["slogan"] = "Conforto em todas as estações"
-
-            return dados
-
+            return completar_config(dados, DEFAULT_CONFIG)
     except Exception:
-        return DEFAULT_CONFIG.copy()
+        return copy.deepcopy(DEFAULT_CONFIG)
 
 
 config = carregar_config()
-
 
 # =========================================================
 # GITHUB API
@@ -387,14 +691,25 @@ def github_request(url, method="GET", data=None):
         method=method
     )
 
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    with urllib.request.urlopen(
+        request,
+        timeout=20
+    ) as response:
+
+        conteudo = response.read().decode("utf-8")
+
+        if not conteudo:
+            return {}
+
+        return json.loads(conteudo)
 
 
 def salvar_config_github(nova_config):
 
     if not GITHUB_TOKEN:
-        raise Exception("GITHUB_TOKEN não encontrado nos Secrets.")
+        raise Exception(
+            "GITHUB_TOKEN não encontrado nos Secrets."
+        )
 
     url = (
         f"https://api.github.com/repos/"
@@ -436,7 +751,6 @@ def salvar_config_github(nova_config):
         data=payload
     )
 
-
 # =========================================================
 # UTILIDADES
 # =========================================================
@@ -451,86 +765,114 @@ def dinheiro(valor):
 
 
 def link_whatsapp(texto):
+
     numero = "".join(
-        c for c in config["empresa"].get("whatsapp", "")
+        c
+        for c in config["empresa"].get(
+            "whatsapp",
+            ""
+        )
         if c.isdigit()
     )
 
-    return f"https://wa.me/{numero}?text={quote(texto)}"
+    return (
+        f"https://wa.me/{numero}"
+        f"?text={quote(texto)}"
+    )
+
+
+def encontrar_logo():
+
+    possibilidades = [
+        "logo.PNG",
+        "logo.png",
+        "Logo.PNG",
+        "Logo.png"
+    ]
+
+    for caminho in possibilidades:
+        if os.path.exists(caminho):
+            return caminho
+
+    return None
+
+
+def titulo_secao(titulo, subtitulo=""):
+
+    html = (
+        '<div class="section-wrap">'
+        f'<div class="section-title">{titulo}</div>'
+        f'<div class="section-subtitle">{subtitulo}</div>'
+        '</div>'
+    )
+
+    st.markdown(
+        html,
+        unsafe_allow_html=True
+    )
 
 
 def cabecalho(area="cliente"):
 
+    logo = encontrar_logo()
+
     col_logo, col_texto = st.columns(
-        [1, 2.8],
+        [1, 2.6],
         vertical_alignment="center"
     )
 
     with col_logo:
 
-        if os.path.exists("logo.PNG"):
+        if logo:
             st.image(
-                "logo.PNG",
+                logo,
                 use_container_width=True
             )
         else:
             st.markdown(
-                "<div style='font-size:55px;text-align:center'>❄️</div>",
+                '<div style="font-size:54px;text-align:center;">❄️</div>',
                 unsafe_allow_html=True
             )
 
     with col_texto:
 
         if area == "admin":
-            titulo = "PAINEL ADMINISTRATIVO"
-            subtitulo = "Gestão • F Climatização"
+
+            html = (
+                '<div class="brand-box">'
+                '<div class="brand-admin">ADMINISTRAÇÃO</div>'
+                '<div class="brand-title">'
+                'F <span class="brand-title-accent">CLIMATIZAÇÃO</span>'
+                '</div>'
+                '<div class="brand-subtitle">'
+                'Painel de gestão e configurações'
+                '</div>'
+                '</div>'
+            )
+
         else:
-            titulo = "F CLIMATIZAÇÃO"
-            subtitulo = config["empresa"].get(
+
+            nome = config["empresa"].get(
+                "nome",
+                "F Climatização"
+            )
+
+            slogan = config["empresa"].get(
                 "slogan",
-                "Conforto em todas as estações"
+                "Seu ambiente na temperatura ideal"
+            )
+
+            html = (
+                '<div class="brand-box">'
+                f'<div class="brand-title">{nome.upper()}</div>'
+                f'<div class="brand-subtitle">{slogan}</div>'
+                '</div>'
             )
 
         st.markdown(
-            f"""
-            <div style="
-                background:linear-gradient(135deg,#031D46,#0759B5);
-                padding:18px;
-                border-radius:18px;
-                box-shadow:0 8px 22px rgba(3,29,70,.15);
-            ">
-                <div style="
-                    color:white;
-                    font-weight:900;
-                    font-size:21px;
-                    line-height:1.15;
-                ">
-                    {titulo}
-                </div>
-
-                <div style="
-                    color:#FF8A00;
-                    font-weight:700;
-                    margin-top:5px;
-                    font-size:13px;
-                ">
-                    {subtitulo}
-                </div>
-            </div>
-            """,
+            html,
             unsafe_allow_html=True
         )
-
-
-def titulo_secao(titulo, subtitulo=""):
-    st.markdown(
-        f"""
-        <div class="section-title">{titulo}</div>
-        <div class="section-subtitle">{subtitulo}</div>
-        """,
-        unsafe_allow_html=True
-    )
-
 
 # =========================================================
 # ADMIN
@@ -560,7 +902,7 @@ def pagina_admin():
 
         titulo_secao(
             "🔐 Acesso administrativo",
-            "Digite sua senha para continuar."
+            "Digite a senha para abrir o painel."
         )
 
         senha = st.text_input(
@@ -570,36 +912,54 @@ def pagina_admin():
         )
 
         if st.button(
-            "Entrar no painel",
+            "ENTRAR NO PAINEL",
             type="primary",
             use_container_width=True
         ):
+
             if senha == ADMIN_KEY:
-                st.session_state["admin_logado"] = True
+
+                st.session_state[
+                    "admin_logado"
+                ] = True
+
                 st.rerun()
+
             else:
-                st.error("Senha incorreta.")
+                st.error(
+                    "Senha incorreta."
+                )
 
         return
 
-    st.success("Administrador conectado")
+    st.success(
+        "Administrador conectado"
+    )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Serviços",
-        "Adicionais",
-        "Materiais",
-        "Aparelhos",
-        "Empresa"
-    ])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        [
+            "Serviços",
+            "Adicionais",
+            "Materiais",
+            "Aparelhos",
+            "Empresa"
+        ]
+    )
+
+    # =====================================================
+    # SERVIÇOS
+    # =====================================================
 
     with tab1:
 
         titulo_secao(
             "Serviços",
-            "Defina disponibilidade e valores."
+            "Defina quais serviços aparecem e os respectivos valores."
         )
 
-        for nome, dados in config["servicos"].items():
+        for nome, dados in config[
+            "servicos"
+        ].items():
 
             with st.expander(nome):
 
@@ -612,16 +972,20 @@ def pagina_admin():
                     key=f"serv_ativo_{nome}"
                 )
 
-                dados["mostrar_cliente"] = st.checkbox(
+                dados[
+                    "mostrar_cliente"
+                ] = st.checkbox(
                     "Mostrar para o cliente",
                     value=dados.get(
                         "mostrar_cliente",
                         True
                     ),
-                    key=f"serv_mostrar_{nome}"
+                    key=f"serv_cliente_{nome}"
                 )
 
-                dados["descricao"] = st.text_area(
+                dados[
+                    "descricao"
+                ] = st.text_area(
                     "Descrição",
                     value=dados.get(
                         "descricao",
@@ -641,23 +1005,29 @@ def pagina_admin():
                     "24.000 BTUs"
                 ]:
 
-                    dados["precos"][capacidade] = (
-                        st.number_input(
-                            capacidade,
-                            min_value=0.0,
-                            value=float(
-                                dados["precos"].get(
-                                    capacidade,
-                                    0
-                                )
-                            ),
-                            step=10.0,
-                            key=(
-                                f"serv_preco_"
-                                f"{nome}_{capacidade}"
+                    dados[
+                        "precos"
+                    ][capacidade] = st.number_input(
+                        capacidade,
+                        min_value=0.0,
+                        value=float(
+                            dados[
+                                "precos"
+                            ].get(
+                                capacidade,
+                                0
                             )
+                        ),
+                        step=10.0,
+                        key=(
+                            f"serv_preco_"
+                            f"{nome}_{capacidade}"
                         )
                     )
+
+    # =====================================================
+    # ADICIONAIS
+    # =====================================================
 
     with tab2:
 
@@ -666,11 +1036,15 @@ def pagina_admin():
             "Configure situações que podem alterar o orçamento."
         )
 
-        for nome, dados in config["adicionais"].items():
+        for nome, dados in config[
+            "adicionais"
+        ].items():
 
             with st.expander(nome):
 
-                dados["mostrar_cliente"] = st.checkbox(
+                dados[
+                    "mostrar_cliente"
+                ] = st.checkbox(
                     "Mostrar para o cliente",
                     value=dados.get(
                         "mostrar_cliente",
@@ -679,7 +1053,9 @@ def pagina_admin():
                     key=f"adic_mostrar_{nome}"
                 )
 
-                dados["descricao"] = st.text_area(
+                dados[
+                    "descricao"
+                ] = st.text_area(
                     "Descrição",
                     value=dados.get(
                         "descricao",
@@ -688,7 +1064,9 @@ def pagina_admin():
                     key=f"adic_desc_{nome}"
                 )
 
-                dados["preco"] = st.number_input(
+                dados[
+                    "preco"
+                ] = st.number_input(
                     "Valor adicional",
                     min_value=0.0,
                     value=float(
@@ -701,6 +1079,10 @@ def pagina_admin():
                     key=f"adic_preco_{nome}"
                 )
 
+    # =====================================================
+    # MATERIAIS
+    # =====================================================
+
     with tab3:
 
         titulo_secao(
@@ -709,9 +1091,8 @@ def pagina_admin():
         )
 
         st.info(
-            "Os materiais técnicos ficam no ADM. "
-            "O cliente não precisa escolher bitolas "
-            "ou componentes."
+            "Os materiais ficam no painel administrativo. "
+            "O cliente não precisa selecionar componentes técnicos."
         )
 
         unidades = [
@@ -720,7 +1101,9 @@ def pagina_admin():
             "serviço"
         ]
 
-        for nome, dados in config["materiais"].items():
+        for nome, dados in config[
+            "materiais"
+        ].items():
 
             with st.expander(nome):
 
@@ -741,7 +1124,9 @@ def pagina_admin():
                 if unidade_atual not in unidades:
                     unidade_atual = "metro"
 
-                dados["unidade"] = st.selectbox(
+                dados[
+                    "unidade"
+                ] = st.selectbox(
                     "Unidade de cobrança",
                     unidades,
                     index=unidades.index(
@@ -750,7 +1135,9 @@ def pagina_admin():
                     key=f"mat_unidade_{nome}"
                 )
 
-                dados["preco"] = st.number_input(
+                dados[
+                    "preco"
+                ] = st.number_input(
                     "Preço de venda",
                     min_value=0.0,
                     value=float(
@@ -763,14 +1150,20 @@ def pagina_admin():
                     key=f"mat_preco_{nome}"
                 )
 
+    # =====================================================
+    # APARELHOS
+    # =====================================================
+
     with tab4:
 
         titulo_secao(
             "Aparelhos",
-            "Equipamentos disponíveis para venda."
+            "Gerencie equipamentos disponíveis para venda."
         )
 
-        for nome, dados in config["equipamentos"].items():
+        for nome, dados in config[
+            "equipamentos"
+        ].items():
 
             with st.expander(nome):
 
@@ -783,7 +1176,9 @@ def pagina_admin():
                     key=f"equip_ativo_{nome}"
                 )
 
-                dados["preco"] = st.number_input(
+                dados[
+                    "preco"
+                ] = st.number_input(
                     "Preço de venda",
                     min_value=0.0,
                     value=float(
@@ -796,45 +1191,64 @@ def pagina_admin():
                     key=f"equip_preco_{nome}"
                 )
 
+    # =====================================================
+    # EMPRESA
+    # =====================================================
+
     with tab5:
 
         titulo_secao(
             "Empresa",
-            "Informações utilizadas no orçamento."
+            "Informações exibidas no aplicativo."
         )
 
-        config["empresa"]["nome"] = st.text_input(
+        config[
+            "empresa"
+        ]["nome"] = st.text_input(
             "Nome da empresa",
-            value=config["empresa"].get(
+            value=config[
+                "empresa"
+            ].get(
                 "nome",
                 "F Climatização"
             ),
             key="empresa_nome"
         )
 
-        config["empresa"]["slogan"] = st.text_input(
+        config[
+            "empresa"
+        ]["slogan"] = st.text_input(
             "Slogan",
-            value=config["empresa"].get(
+            value=config[
+                "empresa"
+            ].get(
                 "slogan",
-                "Conforto em todas as estações"
+                "Seu ambiente na temperatura ideal"
             ),
             key="empresa_slogan"
         )
 
-        config["empresa"]["whatsapp"] = st.text_input(
+        config[
+            "empresa"
+        ]["whatsapp"] = st.text_input(
             "WhatsApp",
-            value=config["empresa"].get(
+            value=config[
+                "empresa"
+            ].get(
                 "whatsapp",
                 ""
             ),
-            help="Código do país + DDD + número.",
+            help=(
+                "Use código do país + DDD + número. "
+                "Exemplo: 5554999999999"
+            ),
             key="empresa_whatsapp"
         )
 
     st.divider()
 
     if st.button(
-        "💾 Salvar alterações",
+        "💾 SALVAR ALTERAÇÕES",
         type="primary",
         use_container_width=True
     ):
@@ -844,7 +1258,10 @@ def pagina_admin():
             with st.spinner(
                 "Salvando alterações..."
             ):
-                salvar_config_github(config)
+
+                salvar_config_github(
+                    config
+                )
 
             st.success(
                 "✅ Alterações salvas permanentemente."
@@ -857,13 +1274,19 @@ def pagina_admin():
             )
 
     if st.button(
-        "🔒 Sair do administrador",
+        "🔒 SAIR DO ADMINISTRADOR",
         use_container_width=True
     ):
-        st.session_state["admin_logado"] = False
-        st.session_state["pagina"] = "cliente"
-        st.rerun()
 
+        st.session_state[
+            "admin_logado"
+        ] = False
+
+        st.session_state[
+            "pagina"
+        ] = "cliente"
+
+        st.rerun()
 
 # =========================================================
 # CLIENTE
@@ -874,16 +1297,20 @@ def pagina_cliente():
     cabecalho("cliente")
 
     st.markdown(
-        """
-        <div class="info-card">
-            <strong>Orçamento rápido e prático</strong><br>
-            <span style="color:#64748B;font-size:13px;">
-            Informe os dados abaixo para receber uma estimativa inicial.
-            </span>
-        </div>
-        """,
+        (
+            '<div class="f-card-blue">'
+            '<div class="f-card-title">Orçamento rápido e prático</div>'
+            '<div class="f-card-text">'
+            'Informe os dados abaixo para receber uma estimativa inicial.'
+            '</div>'
+            '</div>'
+        ),
         unsafe_allow_html=True
     )
+
+    # =====================================================
+    # APARELHO
+    # =====================================================
 
     titulo_secao(
         "❄️ Seu aparelho",
@@ -910,6 +1337,10 @@ def pagina_cliente():
         ]
     )
 
+    # =====================================================
+    # SERVIÇO
+    # =====================================================
+
     titulo_secao(
         "🛠️ Serviço",
         "Selecione o que você precisa."
@@ -932,8 +1363,14 @@ def pagina_cliente():
     servicos = st.multiselect(
         "Serviço desejado",
         servicos_disponiveis,
-        placeholder="Selecione um ou mais serviços"
+        placeholder=(
+            "Selecione um ou mais serviços"
+        )
     )
+
+    # =====================================================
+    # AMBIENTE
+    # =====================================================
 
     titulo_secao(
         "🏠 Ambiente",
@@ -962,24 +1399,32 @@ def pagina_cliente():
         ]
     )
 
+    # =====================================================
+    # LOCAL
+    # =====================================================
+
     titulo_secao(
         "📋 Sobre o local",
-        "Marque somente o que se aplicar."
+        "Marque somente as situações que se aplicam."
     )
 
     situacoes = []
 
-    for nome, dados in config["adicionais"].items():
+    for nome, dados in config[
+        "adicionais"
+    ].items():
 
         if dados.get(
             "mostrar_cliente",
             True
         ):
 
-            if st.checkbox(
+            marcado = st.checkbox(
                 nome,
                 key=f"cliente_{nome}"
-            ):
+            )
+
+            if marcado:
                 situacoes.append(nome)
 
     observacoes = st.text_area(
@@ -989,6 +1434,10 @@ def pagina_cliente():
             "ou alguma necessidade específica."
         )
     )
+
+    # =====================================================
+    # APARELHOS PARA VENDA
+    # =====================================================
 
     aparelho_escolhido = None
 
@@ -1002,7 +1451,9 @@ def pagina_cliente():
         equipamentos_ativos = [
             nome
             for nome, dados
-            in config["equipamentos"].items()
+            in config[
+                "equipamentos"
+            ].items()
             if dados.get(
                 "ativo",
                 False
@@ -1019,13 +1470,17 @@ def pagina_cliente():
         else:
 
             st.info(
-                "Consulte a F Climatização sobre "
-                "os aparelhos disponíveis."
+                "Consulte a F Climatização "
+                "sobre aparelhos disponíveis."
             )
+
+    # =====================================================
+    # DADOS DO CLIENTE
+    # =====================================================
 
     titulo_secao(
         "👤 Seus dados",
-        "Usaremos essas informações somente para o atendimento."
+        "Informações para facilitar o atendimento."
     )
 
     nome_cliente = st.text_input(
@@ -1043,6 +1498,10 @@ def pagina_cliente():
         placeholder="Sua cidade"
     )
 
+    # =====================================================
+    # CÁLCULO
+    # =====================================================
+
     total = 0.0
     tem_valor = False
 
@@ -1051,9 +1510,11 @@ def pagina_cliente():
         for servico in servicos:
 
             valor = float(
-                config["servicos"][
-                    servico
-                ]["precos"].get(
+                config[
+                    "servicos"
+                ][servico][
+                    "precos"
+                ].get(
                     capacidade,
                     0
                 )
@@ -1066,9 +1527,9 @@ def pagina_cliente():
     for adicional in situacoes:
 
         valor = float(
-            config["adicionais"][
-                adicional
-            ].get(
+            config[
+                "adicionais"
+            ][adicional].get(
                 "preco",
                 0
             )
@@ -1081,9 +1542,9 @@ def pagina_cliente():
     if aparelho_escolhido:
 
         preco_aparelho = float(
-            config["equipamentos"][
-                aparelho_escolhido
-            ].get(
+            config[
+                "equipamentos"
+            ][aparelho_escolhido].get(
                 "preco",
                 0
             )
@@ -1094,6 +1555,10 @@ def pagina_cliente():
             tem_valor = True
 
     st.write("")
+
+    # =====================================================
+    # BOTÃO ORÇAMENTO
+    # =====================================================
 
     if st.button(
         "CALCULAR ORÇAMENTO",
@@ -1111,7 +1576,12 @@ def pagina_cliente():
 
             titulo_secao(
                 "💰 Sua estimativa",
-                "Resumo das informações selecionadas."
+                "Resumo inicial do orçamento."
+            )
+
+            st.markdown(
+                '<div class="f-card">',
+                unsafe_allow_html=True
             )
 
             for servico in servicos:
@@ -1124,6 +1594,11 @@ def pagina_cliente():
                     f"✓ {aparelho_escolhido}"
                 )
 
+            st.markdown(
+                "</div>",
+                unsafe_allow_html=True
+            )
+
             if tem_valor:
 
                 st.metric(
@@ -1134,21 +1609,26 @@ def pagina_cliente():
             else:
 
                 st.info(
-                    "O valor será confirmado após avaliarmos "
+                    "O valor será confirmado pela "
+                    "F Climatização após avaliar "
                     "as informações do serviço."
                 )
 
             st.markdown(
-                """
-                <div class="warning-card">
-                    <strong>Importante</strong><br>
-                    Esta é uma estimativa inicial. Caso sejam necessários
-                    materiais adicionais, tubulação extra, adequações,
-                    reparos ou condições especiais de instalação,
-                    informaremos o valor antes da execução.
-                    <strong>Nada será acrescentado sem sua aprovação.</strong>
-                </div>
-                """,
+                (
+                    '<div class="f-card-orange">'
+                    '<div class="f-card-title">Importante</div>'
+                    '<div class="f-card-text">'
+                    'Esta é uma estimativa inicial. Caso sejam necessários '
+                    'materiais adicionais, tubulação extra, adequações, '
+                    'reparos ou condições especiais de instalação, '
+                    'o valor será informado antes da execução. '
+                    '<strong style="color:#FFFFFF;">'
+                    'Nada será acrescentado sem sua aprovação.'
+                    '</strong>'
+                    '</div>'
+                    '</div>'
+                ),
                 unsafe_allow_html=True
             )
 
@@ -1166,87 +1646,125 @@ def pagina_cliente():
             )
 
             if situacoes:
+
                 mensagem += (
-                    "Situações: "
-                    + ", ".join(situacoes)
+                    "Situações informadas: "
+                    + ", ".join(
+                        situacoes
+                    )
                     + "\n"
                 )
 
             if aparelho_escolhido:
+
                 mensagem += (
-                    f"Aparelho escolhido: "
+                    "Aparelho escolhido: "
                     f"{aparelho_escolhido}\n"
                 )
 
             if observacoes:
+
                 mensagem += (
-                    f"Observações: "
+                    "Observações: "
                     f"{observacoes}\n"
                 )
 
             if tem_valor:
+
                 mensagem += (
-                    f"\nEstimativa inicial: "
+                    "\nEstimativa inicial: "
                     f"{dinheiro(total)}"
                 )
 
             st.link_button(
                 "📲 SOLICITAR PELO WHATSAPP",
-                link_whatsapp(mensagem),
+                link_whatsapp(
+                    mensagem
+                ),
                 use_container_width=True
             )
 
             st.markdown(
-                """
-                <div class="info-card">
-                    <strong>📷 Agilize seu atendimento</strong><br>
-                    <span style="color:#64748B;font-size:13px;">
-                    Envie pelo WhatsApp fotos do local onde ficarão
-                    as unidades interna e externa. Se já possui o
-                    aparelho, envie também uma foto da etiqueta/modelo.
-                    </span>
-                </div>
-                """,
+                (
+                    '<div class="f-card-blue">'
+                    '<div class="f-card-title">'
+                    '📷 Agilize seu atendimento'
+                    '</div>'
+                    '<div class="f-card-text">'
+                    'Envie pelo WhatsApp fotos do local onde ficarão '
+                    'a unidade interna e a unidade externa. '
+                    'Se já possui o aparelho, envie também uma foto '
+                    'da etiqueta ou modelo.'
+                    '</div>'
+                    '</div>'
+                ),
                 unsafe_allow_html=True
             )
 
-    titulo_secao(
-        "ℹ️ Observações importantes"
-    )
+    # =====================================================
+    # OBSERVAÇÕES
+    # =====================================================
 
-    st.caption(
-        "Se o serviço, material ou condição necessária não estiver "
-        "listada, fale conosco pelo WhatsApp. Qualquer adicional será "
-        "informado antes e dependerá da aprovação do cliente."
+    titulo_secao(
+        "ℹ️ Observações importantes",
+        ""
     )
 
     st.markdown(
-        """
-        <div class="f-footer">
-            <strong>F CLIMATIZAÇÃO</strong><br>
-            Conforto em todas as estações
-        </div>
-        """,
+        (
+            '<div class="f-card">'
+            '<div class="f-card-text">'
+            'Se o serviço, material ou condição necessária não estiver '
+            'listada, fale conosco pelo WhatsApp. Qualquer adicional será '
+            'informado antes e dependerá da aprovação do cliente.'
+            '</div>'
+            '</div>'
+        ),
+        unsafe_allow_html=True
+    )
+
+    # =====================================================
+    # RODAPÉ
+    # =====================================================
+
+    st.markdown(
+        (
+            '<div class="f-footer">'
+            '<div class="f-footer-name">'
+            'F CLIMATIZAÇÃO'
+            '</div>'
+            '<div class="f-footer-sub">'
+            'Atendimento residencial e comercial'
+            '</div>'
+            '</div>'
+        ),
         unsafe_allow_html=True
     )
 
     st.write("")
+
+    # =====================================================
+    # ACESSO ADMIN
+    # =====================================================
 
     with st.expander(
         "🔐 Área administrativa"
     ):
 
         st.caption(
-            "Acesso exclusivo para administração."
+            "Acesso exclusivo da administração."
         )
 
         if st.button(
-            "Acessar painel administrativo",
+            "ACESSAR PAINEL ADMINISTRATIVO",
             use_container_width=True
         ):
-            st.session_state["pagina"] = "admin"
-            st.rerun()
 
+            st.session_state[
+                "pagina"
+            ] = "admin"
+
+            st.rerun()
 
 # =========================================================
 # NAVEGAÇÃO
@@ -1255,13 +1773,22 @@ def pagina_cliente():
 if "pagina" not in st.session_state:
     st.session_state["pagina"] = "cliente"
 
+# Mantém compatibilidade com o link antigo
 if st.query_params.get(
     "modo",
     ""
 ) == "admin":
-    st.session_state["pagina"] = "admin"
 
-if st.session_state["pagina"] == "admin":
+    st.session_state[
+        "pagina"
+    ] = "admin"
+
+if st.session_state[
+    "pagina"
+] == "admin":
+
     pagina_admin()
+
 else:
+
     pagina_cliente()
