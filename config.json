@@ -125,6 +125,14 @@
       "material_metro": "",
       "permitir_metragem_cliente": true,
       "id": "eq_1791079198"
+    },
+    "c6be7d1f8c8a": {
+      "id": "c6be7d1f8c8a",
+      "marca": "Hisense",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 1950.0,
+      "ativo": true
     }
   },
   "regras": {
