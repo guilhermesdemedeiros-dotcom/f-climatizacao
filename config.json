@@ -133,14 +133,6 @@
       "tipo": "Convencional",
       "preco": 1950.0,
       "ativo": true
-    },
-    "1f7262a33459": {
-      "id": "1f7262a33459",
-      "marca": "Hisense",
-      "capacidade": "12.000 BTUs",
-      "tipo": "Convencional",
-      "preco": 1950.0,
-      "ativo": true
     }
   },
   "regras": {
