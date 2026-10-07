@@ -194,6 +194,14 @@
       "tipo": "Inverter",
       "preco": 3850.0,
       "ativo": true
+    },
+    "d17082b54a9a": {
+      "id": "d17082b54a9a",
+      "marca": "Midea",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 3850.0,
+      "ativo": true
     }
   },
   "regras": {
