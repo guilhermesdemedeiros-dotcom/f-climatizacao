@@ -186,6 +186,14 @@
       "tipo": "Convencional",
       "preco": 2200.0,
       "ativo": true
+    },
+    "ec050e51b33a": {
+      "id": "ec050e51b33a",
+      "marca": "Gree",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 3850.0,
+      "ativo": true
     }
   },
   "regras": {
