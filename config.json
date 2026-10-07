@@ -178,6 +178,14 @@
       "tipo": "Inverter",
       "preco": 2200.0,
       "ativo": true
+    },
+    "77534eef28ba": {
+      "id": "77534eef28ba",
+      "marca": "Gree",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 2200.0,
+      "ativo": true
     }
   },
   "regras": {
