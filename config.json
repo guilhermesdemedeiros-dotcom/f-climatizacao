@@ -154,6 +154,14 @@
       "tipo": "Inverter",
       "preco": 2500.0,
       "ativo": true
+    },
+    "432faff5aabb": {
+      "id": "432faff5aabb",
+      "marca": "Midea",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 2200.0,
+      "ativo": true
     }
   },
   "regras": {
