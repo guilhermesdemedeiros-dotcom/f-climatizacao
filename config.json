@@ -210,6 +210,14 @@
       "tipo": "Inverter",
       "preco": 2450.0,
       "ativo": true
+    },
+    "53b49314b9c2": {
+      "id": "53b49314b9c2",
+      "marca": "Tcl",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 2200.0,
+      "ativo": true
     }
   },
   "regras": {
