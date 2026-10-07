@@ -162,6 +162,14 @@
       "tipo": "Convencional",
       "preco": 2200.0,
       "ativo": true
+    },
+    "f29d41547f11": {
+      "id": "f29d41547f11",
+      "marca": "Climax",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 1950.0,
+      "ativo": true
     }
   },
   "regras": {
