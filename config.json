@@ -113,6 +113,11 @@
       "preco": 50.0,
       "ativo": true,
       "mostrar_cliente": true
+    },
+    "Suporte 400mm": {
+      "unidade": "unidade",
+      "preco": 40.0,
+      "ativo": true
     }
   },
   "equipamentos": {
