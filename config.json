@@ -202,6 +202,14 @@
       "tipo": "Inverter",
       "preco": 3850.0,
       "ativo": true
+    },
+    "2a2aa3df381b": {
+      "id": "2a2aa3df381b",
+      "marca": "Tcl",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 2450.0,
+      "ativo": true
     }
   },
   "regras": {
