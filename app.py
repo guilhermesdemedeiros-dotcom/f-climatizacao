@@ -246,6 +246,31 @@ hr{border-color:#243147!important;}
   margin-top:4px;
   line-height:1.35;
 }
+.equipment-option{
+  background:#0e141e;
+  border:1px solid #26354a;
+  border-left:4px solid #0878e8;
+  border-radius:14px;
+  padding:11px 13px;
+  margin:8px 0;
+}
+.equipment-option-name{
+  color:#fff;
+  font-weight:800;
+  font-size:13px;
+  line-height:1.3;
+}
+.equipment-option-price{
+  color:#45d483;
+  font-weight:900;
+  font-size:14px;
+  margin-top:4px;
+}
+.equipment-option-total{
+  color:#9caec4;
+  font-size:11px;
+  margin-top:3px;
+}
 @media(max-width:600px){
   .block-container{padding-left:.85rem;padding-right:.85rem;}
   .brand-logo{width:48px;height:48px;flex-basis:48px;}
@@ -1091,64 +1116,138 @@ def gerar_pdf(orcamento):
     )
     story += [cliente_tbl, Spacer(1, 6 * mm)]
 
-    story.append(Paragraph("<b>Itens do orçamento</b>", title_style))
-    dados = [["Descrição", "Qtd.", "Unidade", "Valor unit.", "Total"]]
+    itens_orcamento = orcamento.get("itens", [])
+    opcoes_equipamentos_pdf = orcamento.get("opcoes_equipamentos", [])
 
-    for item in orcamento.get("itens", []):
-        qtd = float(item.get("quantidade", 0) or 0)
-        vu = float(item.get("valor_unitario", 0) or 0)
-        total = qtd * vu
-        dados.append(
-            [
-                Paragraph(str(item.get("descricao", "")), small),
-                f"{qtd:g}",
-                item.get("unidade", ""),
-                dinheiro(vu),
-                dinheiro(total),
-            ]
+    if itens_orcamento:
+        titulo_itens = (
+            "<b>Serviços e itens base</b>"
+            if opcoes_equipamentos_pdf
+            else "<b>Itens do orçamento</b>"
         )
+        story.append(Paragraph(titulo_itens, title_style))
+        dados = [["Descrição", "Qtd.", "Unidade", "Valor unit.", "Total"]]
 
-    itens_tbl = Table(
-        dados,
-        colWidths=[78 * mm, 18 * mm, 24 * mm, 27 * mm, 27 * mm],
-        repeatRows=1,
-    )
-    itens_tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), azul),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFBFD")]),
-                ("PADDING", (0, 0), (-1, -1), 5),
-            ]
+        for item in itens_orcamento:
+            qtd = float(item.get("quantidade", 0) or 0)
+            vu = float(item.get("valor_unitario", 0) or 0)
+            total_item = qtd * vu
+            dados.append(
+                [
+                    Paragraph(str(item.get("descricao", "")), small),
+                    f"{qtd:g}",
+                    item.get("unidade", ""),
+                    dinheiro(vu),
+                    dinheiro(total_item),
+                ]
+            )
+
+        itens_tbl = Table(
+            dados,
+            colWidths=[78 * mm, 18 * mm, 24 * mm, 27 * mm, 27 * mm],
+            repeatRows=1,
         )
-    )
-    story += [itens_tbl, Spacer(1, 5 * mm)]
+        itens_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), azul),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFBFD")]),
+                    ("PADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        story += [itens_tbl, Spacer(1, 5 * mm)]
 
     total = sum(
         float(i.get("quantidade", 0) or 0) * float(i.get("valor_unitario", 0) or 0)
-        for i in orcamento.get("itens", [])
+        for i in itens_orcamento
     )
 
-    total_tbl = Table(
-        [[Paragraph("<b>TOTAL ESTIMADO</b>", normal), Paragraph(f"<b>{dinheiro(total)}</b>", right)]],
-        colWidths=[120 * mm, 54 * mm],
-    )
-    total_tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E8")),
-                ("BOX", (0, 0), (-1, -1), 0.8, laranja),
-                ("PADDING", (0, 0), (-1, -1), 8),
-            ]
+    if opcoes_equipamentos_pdf:
+        base_tbl = Table(
+            [[
+                Paragraph("<b>SERVIÇOS / ITENS BASE</b>", normal),
+                Paragraph(f"<b>{dinheiro(total)}</b>", right),
+            ]],
+            colWidths=[120 * mm, 54 * mm],
         )
-    )
-    story += [total_tbl, Spacer(1, 6 * mm)]
+        base_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4F7FB")),
+                    ("BOX", (0, 0), (-1, -1), 0.7, azul2),
+                    ("PADDING", (0, 0), (-1, -1), 7),
+                ]
+            )
+        )
+        story += [base_tbl, Spacer(1, 5 * mm)]
+
+        story.append(Paragraph("<b>Opções de equipamento</b>", title_style))
+        story.append(
+            Paragraph(
+                "Escolha uma das opções abaixo. Os equipamentos são alternativas e não são somados entre si.",
+                small,
+            )
+        )
+        story.append(Spacer(1, 2 * mm))
+
+        dados_opcoes = [["Equipamento", "Preço", "Total c/ serviços"]]
+
+        for opcao in opcoes_equipamentos_pdf:
+            preco_eq = float(opcao.get("preco", 0) or 0)
+            dados_opcoes.append(
+                [
+                    Paragraph(str(opcao.get("descricao", "Ar-condicionado")), small),
+                    dinheiro(preco_eq),
+                    dinheiro(total + preco_eq),
+                ]
+            )
+
+        opcoes_tbl = Table(
+            dados_opcoes,
+            colWidths=[94 * mm, 38 * mm, 42 * mm],
+            repeatRows=1,
+        )
+        opcoes_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), azul),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFBFD")]),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        story += [opcoes_tbl, Spacer(1, 6 * mm)]
+    else:
+        total_tbl = Table(
+            [[
+                Paragraph("<b>TOTAL ESTIMADO</b>", normal),
+                Paragraph(f"<b>{dinheiro(total)}</b>", right),
+            ]],
+            colWidths=[120 * mm, 54 * mm],
+        )
+        total_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E8")),
+                    ("BOX", (0, 0), (-1, -1), 0.8, laranja),
+                    ("PADDING", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story += [total_tbl, Spacer(1, 6 * mm)]
 
     obs = orcamento.get("observacoes", "")
     adicional = orcamento.get("adicional", {})
@@ -1275,9 +1374,16 @@ def aba_orcamentos():
         numero = o.get("numero", "----")
         nome = o.get("cliente", {}).get("nome", "Cliente")
         total = calcular_total(o.get("itens", []))
+        qtd_opcoes = len(o.get("opcoes_equipamentos", []))
+
+        rotulo_total = (
+            f"{qtd_opcoes} opção(ões) de aparelho"
+            if qtd_opcoes
+            else dinheiro(total)
+        )
 
         with st.expander(
-            f"Orçamento {numero} • {nome} • {dinheiro(total)}"
+            f"Orçamento {numero} • {nome} • {rotulo_total}"
         ):
             st.markdown(
                 f'<span class="budget-number">#{numero}</span>',
@@ -1289,6 +1395,17 @@ def aba_orcamentos():
                 f"{o.get('cliente',{}).get('telefone','')} • "
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
+
+            if o.get("opcoes_equipamentos"):
+                st.markdown("#### Opções de aparelho")
+                st.caption("Alternativas de compra — não são somadas entre si.")
+                for opcao in o.get("opcoes_equipamentos", []):
+                    preco_eq = float(opcao.get("preco", 0) or 0)
+                    st.write(
+                        f"**{opcao.get('descricao','Aparelho')}** — "
+                        f"{dinheiro(preco_eq)} "
+                        f"(com itens base: {dinheiro(total + preco_eq)})"
+                    )
 
             st.markdown("#### Itens atuais")
 
@@ -2090,54 +2207,70 @@ def pagina_cliente():
 
     equipamento_id = None
     equipamento = None
+    opcoes_equipamentos = []
 
     if possui == "Não, quero comprar":
-        ativos = [
-            (eid, eq)
+        garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
+
+        capacidade = st.selectbox(
+            "Capacidade desejada",
+            CAPACIDADES,
+            key="cliente_capacidade_compra",
+        )
+
+        mostrar_referencia_capacidade(capacidade)
+
+        opcoes_equipamentos = [
+            {
+                "id": eid,
+                "marca": eq.get("marca", ""),
+                "capacidade": eq.get("capacidade", capacidade),
+                "tipo": eq.get("tipo", ""),
+                "preco": float(eq.get("preco", 0) or 0),
+                "descricao": nome_equipamento(eq),
+            }
             for eid, eq in config["equipamentos"].items()
             if eq.get("ativo", False)
+            and eq.get("capacidade") == capacidade
         ]
 
-        if ativos:
-            mapa = {nome_equipamento(eq): eid for eid, eq in ativos}
-            nomes_equipamentos = list(mapa.keys())
-            garantir_opcao_valida("cliente_equipamento", nomes_equipamentos)
-
-            escolha = st.selectbox(
-                "Escolha o aparelho",
-                nomes_equipamentos,
-                key="cliente_equipamento",
+        opcoes_equipamentos.sort(
+            key=lambda item: (
+                float(item.get("preco", 0) or 0),
+                item.get("marca", "").lower(),
             )
-            equipamento_id = mapa[escolha]
-            equipamento = config["equipamentos"][equipamento_id]
-            capacidade = equipamento.get("capacidade", "9.000 BTUs")
+        )
 
-            mostrar_referencia_capacidade(capacidade)
-
+        if opcoes_equipamentos:
             st.caption(
-                f"Preço-base do equipamento: {dinheiro(equipamento.get('preco', 0))}"
+                f"{len(opcoes_equipamentos)} opção(ões) de {capacidade} disponível(is). "
+                "Todas serão apresentadas separadamente no orçamento."
             )
+
+            for opcao in opcoes_equipamentos:
+                st.markdown(
+                    (
+                        '<div class="equipment-option">'
+                        f'<div class="equipment-option-name">{opcao["descricao"]}</div>'
+                        f'<div class="equipment-option-price">{dinheiro(opcao["preco"])}</div>'
+                        '</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
+
             st.markdown(
                 f"""
                 <div class="orange-card">
-                  <div class="card-title">Valor estimado do equipamento</div>
+                  <div class="card-title">Valores dos equipamentos</div>
                   <div class="card-text">{config["regras"].get("texto_equipamento","")}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         else:
-            garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
-            capacidade = st.selectbox(
-                "Capacidade desejada",
-                CAPACIDADES,
-                key="cliente_capacidade_compra",
-            )
-            mostrar_referencia_capacidade(capacidade)
-
             st.info(
-                "Nenhum aparelho está disponível no catálogo no momento. "
-                "A equipe confirmará as opções pelo WhatsApp."
+                f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento. "
+                "A equipe poderá informar outras opções pelo WhatsApp."
             )
     else:
         opcoes_capacidade = CAPACIDADES + ["Não sei"]
@@ -2263,24 +2396,13 @@ def pagina_cliente():
             st.warning("Informe um telefone/WhatsApp.")
             return
 
-        if not servicos and equipamento is None:
-            st.warning("Selecione pelo menos um serviço ou um aparelho.")
+        if not servicos and not opcoes_equipamentos:
+            st.warning("Selecione pelo menos um serviço ou uma capacidade com aparelho disponível.")
             return
 
         itens = []
 
         cap_calculo = capacidade if capacidade in CAPACIDADES else None
-
-        if equipamento is not None:
-            itens.append(
-                montar_item(
-                    nome_equipamento(equipamento),
-                    1,
-                    "equipamento",
-                    equipamento.get("preco", 0),
-                    origem="equipamento",
-                )
-            )
 
         if cap_calculo:
             for nome_servico in servicos:
@@ -2345,6 +2467,7 @@ def pagina_cliente():
             "andar": int(andar) if tipo_imovel == "Apartamento" else None,
             "area_ambiente": area,
             "equipamento_id": equipamento_id,
+            "opcoes_equipamentos": opcoes_equipamentos,
             "itens": itens,
             "adicional": {
                 "solicitado": adicional_sim == "Sim",
@@ -2374,7 +2497,12 @@ def pagina_cliente():
 
         secao(f"Orçamento {numero}", "Estimativa registrada com sucesso.")
 
-        st.metric("Total estimado", dinheiro(total))
+        opcoes_pdf = ultimo.get("opcoes_equipamentos", [])
+
+        if opcoes_pdf:
+            st.metric("Serviços e itens base", dinheiro(total))
+        else:
+            st.metric("Total estimado", dinheiro(total))
 
         for item in ultimo.get("itens", []):
             qtd = float(item.get("quantidade", 0) or 0)
@@ -2384,6 +2512,28 @@ def pagina_cliente():
                 f"{qtd:g} {item.get('unidade','')} × "
                 f"{dinheiro(vu)} = **{dinheiro(qtd * vu)}**"
             )
+
+        if opcoes_pdf:
+            st.markdown("#### Opções de aparelho")
+            st.caption(
+                "Os aparelhos abaixo são alternativas. Os valores não são somados entre si."
+            )
+
+            for opcao in opcoes_pdf:
+                preco_eq = float(opcao.get("preco", 0) or 0)
+                total_opcao = total + preco_eq
+
+                st.markdown(
+                    (
+                        '<div class="equipment-option">'
+                        f'<div class="equipment-option-name">{opcao.get("descricao","Aparelho")}</div>'
+                        f'<div class="equipment-option-price">{dinheiro(preco_eq)}</div>'
+                        f'<div class="equipment-option-total">Total estimado com serviços: '
+                        f'<b>{dinheiro(total_opcao)}</b></div>'
+                        '</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
 
         if ultimo.get("adicional", {}).get("solicitado"):
             desc = ultimo.get("adicional", {}).get("descricao", "").strip()
