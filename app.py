@@ -1184,7 +1184,7 @@ def gerar_pdf(orcamento):
     if opcoes_equipamentos_pdf:
         base_tbl = Table(
             [[
-                Paragraph("<b>SERVIÇOS / ITENS BASE</b>", normal),
+                Paragraph("<b>ITENS COMUNS DO ORÇAMENTO</b>", normal),
                 Paragraph(f"<b>{dinheiro(total)}</b>", right),
             ]],
             colWidths=[120 * mm, 54 * mm],
@@ -1203,7 +1203,7 @@ def gerar_pdf(orcamento):
         story.append(Paragraph("<b>Opções de equipamento</b>", title_style))
         story.append(
             Paragraph(
-                "Escolha uma das opções abaixo. Os equipamentos são alternativas e não são somados entre si.",
+                "As opções podem ter capacidades diferentes. Cada total considera o equipamento e os serviços correspondentes à sua capacidade.",
                 small,
             )
         )
@@ -1213,11 +1213,30 @@ def gerar_pdf(orcamento):
 
         for opcao in opcoes_equipamentos_pdf:
             preco_eq = float(opcao.get("preco", 0) or 0)
+            total_servicos_opcao = float(
+                opcao.get("total_servicos", 0) or 0
+            )
+            total_final_opcao = total + preco_eq + total_servicos_opcao
+
+            descricao_opcao = str(
+                opcao.get("descricao", "Ar-condicionado")
+            )
+
+            if opcao.get("servicos"):
+                linhas_servico = "<br/>".join(
+                    f'{s.get("descricao","")}: {dinheiro(s.get("valor",0))}'
+                    for s in opcao.get("servicos", [])
+                )
+                descricao_opcao += (
+                    f"<br/><font size='7' color='#5F6B7A'>"
+                    f"{linhas_servico}</font>"
+                )
+
             dados_opcoes.append(
                 [
-                    Paragraph(str(opcao.get("descricao", "Ar-condicionado")), small),
+                    Paragraph(descricao_opcao, small),
                     dinheiro(preco_eq),
-                    dinheiro(total + preco_eq),
+                    dinheiro(total_final_opcao),
                 ]
             )
 
@@ -1413,10 +1432,18 @@ def aba_orcamentos():
                 st.caption("Alternativas de compra — não são somadas entre si.")
                 for opcao in o.get("opcoes_equipamentos", []):
                     preco_eq = float(opcao.get("preco", 0) or 0)
+                    total_servicos_opcao = float(
+                        opcao.get("total_servicos", 0) or 0
+                    )
+                    total_opcao = (
+                        total
+                        + preco_eq
+                        + total_servicos_opcao
+                    )
                     st.write(
                         f"**{opcao.get('descricao','Aparelho')}** — "
                         f"{dinheiro(preco_eq)} "
-                        f"(com itens base: {dinheiro(total + preco_eq)})"
+                        f"• total desta opção: **{dinheiro(total_opcao)}**"
                     )
 
             st.markdown("#### Itens atuais")
@@ -2225,78 +2252,117 @@ def pagina_cliente():
         garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
 
         capacidade = st.selectbox(
-            "Capacidade desejada",
+            "Capacidade para visualizar",
             CAPACIDADES,
             key="cliente_capacidade_compra",
         )
 
         mostrar_referencia_capacidade(capacidade)
 
-        opcoes_disponiveis = [
+        # Todos os aparelhos ativos ficam disponíveis para seleção persistente,
+        # mesmo quando o usuário troca o filtro de BTUs.
+        todos_ativos = [
             {
                 "id": eid,
                 "marca": eq.get("marca", ""),
-                "capacidade": eq.get("capacidade", capacidade),
+                "capacidade": eq.get("capacidade", ""),
                 "tipo": eq.get("tipo", ""),
                 "preco": float(eq.get("preco", 0) or 0),
                 "descricao": nome_equipamento(eq),
             }
             for eid, eq in config["equipamentos"].items()
             if eq.get("ativo", False)
-            and eq.get("capacidade") == capacidade
+        ]
+
+        opcoes_disponiveis = [
+            opcao
+            for opcao in todos_ativos
+            if opcao.get("capacidade") == capacidade
         ]
 
         opcoes_disponiveis.sort(
             key=lambda item: (
                 float(item.get("preco", 0) or 0),
                 item.get("marca", "").lower(),
+                item.get("tipo", "").lower(),
             )
         )
 
         if opcoes_disponiveis:
             st.caption(
-                "Marque um ou mais modelos para incluir como alternativas no orçamento."
+                "Marque os modelos desejados. Você pode trocar os BTUs acima "
+                "e continuar selecionando sem perder os anteriores."
             )
 
             for opcao in opcoes_disponiveis:
                 eid = str(opcao["id"])
-                selecionado = st.checkbox(
+
+                st.checkbox(
                     f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}',
                     key=f"cliente_eq_{eid}",
                 )
-
-                if selecionado:
-                    opcoes_equipamentos.append(opcao)
-
-            if opcoes_equipamentos:
-                st.markdown(
-                    f'<div class="capacity-ok">'
-                    f'{len(opcoes_equipamentos)} modelo(s) selecionado(s) para o orçamento.'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    '<div class="capacity-note">'
-                    'Nenhum modelo selecionado ainda.'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-
-            st.markdown(
-                f"""
-                <div class="orange-card">
-                  <div class="card-title">Valores dos equipamentos</div>
-                  <div class="card-text">{config["regras"].get("texto_equipamento","")}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
         else:
             st.info(
-                f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento. "
-                "A equipe poderá informar outras opções pelo WhatsApp."
+                f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento."
             )
+
+        # Reúne TODAS as opções já marcadas, inclusive capacidades que
+        # não estão visíveis no filtro atual.
+        opcoes_equipamentos = [
+            opcao
+            for opcao in todos_ativos
+            if st.session_state.get(
+                f'cliente_eq_{str(opcao["id"])}',
+                False,
+            )
+        ]
+
+        opcoes_equipamentos.sort(
+            key=lambda item: (
+                BTU_NUM.get(item.get("capacidade"), 999999),
+                float(item.get("preco", 0) or 0),
+                item.get("marca", "").lower(),
+            )
+        )
+
+        if opcoes_equipamentos:
+            capacidades_selecionadas = []
+            for opcao in opcoes_equipamentos:
+                cap = opcao.get("capacidade", "")
+                if cap and cap not in capacidades_selecionadas:
+                    capacidades_selecionadas.append(cap)
+
+            st.markdown(
+                f'<div class="capacity-ok">'
+                f'{len(opcoes_equipamentos)} modelo(s) selecionado(s) em '
+                f'{len(capacidades_selecionadas)} capacidade(s).'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.expander("Ver modelos selecionados"):
+                for opcao in opcoes_equipamentos:
+                    st.write(
+                        f'**{opcao["descricao"]}** — '
+                        f'{dinheiro(opcao["preco"])}'
+                    )
+        else:
+            st.markdown(
+                '<div class="capacity-note">'
+                'Nenhum modelo selecionado ainda.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f"""
+            <div class="orange-card">
+              <div class="card-title">Valores dos equipamentos</div>
+              <div class="card-text">{config["regras"].get("texto_equipamento","")}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         opcoes_capacidade = CAPACIDADES + ["Não sei"]
         garantir_opcao_valida("cliente_capacidade", opcoes_capacidade)
@@ -2429,7 +2495,45 @@ def pagina_cliente():
 
         cap_calculo = capacidade if capacidade in CAPACIDADES else None
 
-        if cap_calculo:
+        # Quando há aparelhos para compra, os serviços ficam associados
+        # a cada alternativa, usando a capacidade específica de cada modelo.
+        # Assim, 12.000 e 18.000 BTUs podem coexistir no mesmo orçamento
+        # sem misturar os valores.
+        if possui == "Não, quero comprar" and opcoes_equipamentos:
+            opcoes_com_servicos = []
+
+            for opcao in opcoes_equipamentos:
+                opcao_final = copy.deepcopy(opcao)
+                cap_opcao = opcao_final.get("capacidade")
+                servicos_opcao = []
+
+                for nome_servico in servicos:
+                    dados_servico = config["servicos"][nome_servico]
+                    valor_servico = float(
+                        dados_servico.get("precos", {}).get(
+                            cap_opcao,
+                            0,
+                        )
+                        or 0
+                    )
+
+                    servicos_opcao.append(
+                        {
+                            "descricao": f"{nome_servico} • {cap_opcao}",
+                            "valor": valor_servico,
+                        }
+                    )
+
+                opcao_final["servicos"] = servicos_opcao
+                opcao_final["total_servicos"] = sum(
+                    float(s.get("valor", 0) or 0)
+                    for s in servicos_opcao
+                )
+                opcoes_com_servicos.append(opcao_final)
+
+            opcoes_equipamentos = opcoes_com_servicos
+
+        elif cap_calculo:
             for nome_servico in servicos:
                 dados = config["servicos"][nome_servico]
                 valor = float(
@@ -2525,7 +2629,7 @@ def pagina_cliente():
         opcoes_pdf = ultimo.get("opcoes_equipamentos", [])
 
         if opcoes_pdf:
-            st.metric("Serviços e itens base", dinheiro(total))
+            st.metric("Itens comuns do orçamento", dinheiro(total))
         else:
             st.metric("Total estimado", dinheiro(total))
 
@@ -2546,14 +2650,29 @@ def pagina_cliente():
 
             for opcao in opcoes_pdf:
                 preco_eq = float(opcao.get("preco", 0) or 0)
-                total_opcao = total + preco_eq
+                total_servicos_opcao = float(
+                    opcao.get("total_servicos", 0) or 0
+                )
+                total_opcao = total + preco_eq + total_servicos_opcao
+
+                detalhes_servicos = ""
+                if opcao.get("servicos"):
+                    detalhes_servicos = " • ".join(
+                        f'{s.get("descricao","")}: {dinheiro(s.get("valor",0))}'
+                        for s in opcao.get("servicos", [])
+                    )
 
                 st.markdown(
                     (
                         '<div class="equipment-option">'
                         f'<div class="equipment-option-name">{opcao.get("descricao","Aparelho")}</div>'
                         f'<div class="equipment-option-price">{dinheiro(preco_eq)}</div>'
-                        f'<div class="equipment-option-total">Total estimado com serviços: '
+                        + (
+                            f'<div class="equipment-option-total">{detalhes_servicos}</div>'
+                            if detalhes_servicos
+                            else ""
+                        )
+                        + f'<div class="equipment-option-total">Total desta opção: '
                         f'<b>{dinheiro(total_opcao)}</b></div>'
                         '</div>'
                     ),
