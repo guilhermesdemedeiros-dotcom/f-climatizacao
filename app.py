@@ -457,6 +457,9 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_possui",
     "cliente_equipamento",
     "cliente_capacidade_compra",
+    "cliente_capacidade_compra_unico",
+    "cliente_modo_compra",
+    "cliente_equipamento_unico",
     "cliente_capacidade",
     "cliente_servicos",
     "cliente_tipo_imovel",
@@ -1184,28 +1187,59 @@ def gerar_pdf(orcamento):
     )
 
     if opcoes_equipamentos_pdf:
-        base_tbl = Table(
-            [[
-                Paragraph("<b>ITENS COMUNS DO ORÇAMENTO</b>", normal),
-                Paragraph(f"<b>{dinheiro(total)}</b>", right),
-            ]],
-            colWidths=[120 * mm, 54 * mm],
-        )
-        base_tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4F7FB")),
-                    ("BOX", (0, 0), (-1, -1), 0.7, azul2),
-                    ("PADDING", (0, 0), (-1, -1), 7),
-                ]
+        if total > 0:
+            base_tbl = Table(
+                [[
+                    Paragraph(
+                        "<b>ITENS COMUNS DO ORÇAMENTO</b>",
+                        normal,
+                    ),
+                    Paragraph(
+                        f"<b>{dinheiro(total)}</b>",
+                        right,
+                    ),
+                ]],
+                colWidths=[120 * mm, 54 * mm],
             )
-        )
-        story += [base_tbl, Spacer(1, 5 * mm)]
+            base_tbl.setStyle(
+                TableStyle(
+                    [
+                        (
+                            "BACKGROUND",
+                            (0, 0),
+                            (-1, -1),
+                            colors.HexColor("#F4F7FB"),
+                        ),
+                        (
+                            "BOX",
+                            (0, 0),
+                            (-1, -1),
+                            0.7,
+                            azul2,
+                        ),
+                        (
+                            "PADDING",
+                            (0, 0),
+                            (-1, -1),
+                            7,
+                        ),
+                    ]
+                )
+            )
+            story += [
+                base_tbl,
+                Spacer(1, 5 * mm),
+            ]
 
-        story.append(Paragraph("<b>Opções de equipamento</b>", title_style))
         story.append(
             Paragraph(
-                "As opções podem ter capacidades diferentes. Cada total considera o equipamento e os serviços correspondentes à sua capacidade.",
+                "<b>Opções de equipamento</b>",
+                title_style,
+            )
+        )
+        story.append(
+            Paragraph(
+                "Orçamento comparativo. Cada alternativa apresenta seu próprio valor com os serviços correspondentes, sem somar os aparelhos entre si.",
                 small,
             )
         )
@@ -2249,30 +2283,21 @@ def pagina_cliente():
     equipamento_id = None
     equipamento = None
     opcoes_equipamentos = []
+    modo_compra = None
 
     if possui == "Não, quero comprar":
-        garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
+        modos_compra = [
+            "Escolher um aparelho",
+            "Comparar aparelhos",
+        ]
+        garantir_opcao_valida("cliente_modo_compra", modos_compra)
 
-        # Lista persistente independente dos checkboxes visíveis.
-        # Isso evita perder seleções quando o filtro de BTUs muda.
-        if "cliente_equipamentos_selecionados" not in st.session_state:
-            st.session_state["cliente_equipamentos_selecionados"] = []
-
-        selecionados_ids = set(
-            str(x)
-            for x in st.session_state.get(
-                "cliente_equipamentos_selecionados",
-                [],
-            )
+        modo_compra = st.radio(
+            "Como deseja montar o orçamento?",
+            modos_compra,
+            horizontal=True,
+            key="cliente_modo_compra",
         )
-
-        capacidade = st.selectbox(
-            "Capacidade para visualizar",
-            CAPACIDADES,
-            key="cliente_capacidade_compra",
-        )
-
-        mostrar_referencia_capacidade(capacidade)
 
         todos_ativos = [
             {
@@ -2287,121 +2312,219 @@ def pagina_cliente():
             if eq.get("ativo", False)
         ]
 
-        ids_ativos = {str(opcao["id"]) for opcao in todos_ativos}
-
-        # Remove apenas IDs de aparelhos que deixaram de existir/estar ativos.
-        selecionados_ids = {
-            eid for eid in selecionados_ids
-            if eid in ids_ativos
-        }
-
-        opcoes_disponiveis = [
-            opcao
-            for opcao in todos_ativos
-            if opcao.get("capacidade") == capacidade
-        ]
-
-        opcoes_disponiveis.sort(
-            key=lambda item: (
-                float(item.get("preco", 0) or 0),
-                item.get("marca", "").lower(),
-                item.get("tipo", "").lower(),
-            )
-        )
-
-        if opcoes_disponiveis:
-            st.caption(
-                "Marque os modelos desejados. Ao trocar os BTUs, "
-                "as escolhas anteriores continuam salvas neste orçamento."
+        if modo_compra == "Escolher um aparelho":
+            garantir_opcao_valida(
+                "cliente_capacidade_compra_unico",
+                CAPACIDADES,
             )
 
-            for opcao in opcoes_disponiveis:
-                eid = str(opcao["id"])
-                widget_key = f"cliente_eq_visivel_{eid}"
+            capacidade = st.selectbox(
+                "Capacidade desejada",
+                CAPACIDADES,
+                key="cliente_capacidade_compra_unico",
+            )
 
-                # Ao voltar para esta capacidade, recria o checkbox
-                # exatamente com o estado persistente salvo.
-                if widget_key not in st.session_state:
-                    st.session_state[widget_key] = eid in selecionados_ids
+            mostrar_referencia_capacidade(capacidade)
 
-                marcado = st.checkbox(
-                    f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}',
-                    key=widget_key,
+            disponiveis = [
+                opcao
+                for opcao in todos_ativos
+                if opcao.get("capacidade") == capacidade
+            ]
+            disponiveis.sort(
+                key=lambda item: (
+                    float(item.get("preco", 0) or 0),
+                    item.get("marca", "").lower(),
+                    item.get("tipo", "").lower(),
+                )
+            )
+
+            if disponiveis:
+                mapa_unico = {
+                    f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}': opcao
+                    for opcao in disponiveis
+                }
+
+                nomes_unicos = list(mapa_unico.keys())
+                garantir_opcao_valida(
+                    "cliente_equipamento_unico",
+                    nomes_unicos,
                 )
 
-                if marcado:
-                    selecionados_ids.add(eid)
-                else:
-                    selecionados_ids.discard(eid)
+                escolha_unica = st.selectbox(
+                    "Escolha o aparelho",
+                    nomes_unicos,
+                    key="cliente_equipamento_unico",
+                )
+
+                equipamento = mapa_unico[escolha_unica]
+                equipamento_id = equipamento["id"]
+
+                st.markdown(
+                    (
+                        '<div class="equipment-option">'
+                        f'<div class="equipment-option-name">{equipamento["descricao"]}</div>'
+                        f'<div class="equipment-option-price">{dinheiro(equipamento["preco"])}</div>'
+                        '<div class="equipment-option-total">'
+                        'Este aparelho será somado aos serviços e demais itens do orçamento.'
+                        '</div>'
+                        '</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info(
+                    f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento."
+                )
 
         else:
-            st.info(
-                f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento."
+            garantir_opcao_valida(
+                "cliente_capacidade_compra",
+                CAPACIDADES,
             )
 
-        # Salva o estado em uma chave que NÃO pertence a widget.
-        st.session_state["cliente_equipamentos_selecionados"] = sorted(
-            selecionados_ids
-        )
+            if "cliente_equipamentos_selecionados" not in st.session_state:
+                st.session_state["cliente_equipamentos_selecionados"] = []
 
-        opcoes_equipamentos = [
-            opcao
-            for opcao in todos_ativos
-            if str(opcao["id"]) in selecionados_ids
-        ]
-
-        opcoes_equipamentos.sort(
-            key=lambda item: (
-                BTU_NUM.get(item.get("capacidade"), 999999),
-                float(item.get("preco", 0) or 0),
-                item.get("marca", "").lower(),
-            )
-        )
-
-        if opcoes_equipamentos:
-            capacidades_selecionadas = []
-
-            for opcao in opcoes_equipamentos:
-                cap = opcao.get("capacidade", "")
-                if cap and cap not in capacidades_selecionadas:
-                    capacidades_selecionadas.append(cap)
-
-            st.markdown(
-                f'<div class="capacity-ok">'
-                f'{len(opcoes_equipamentos)} modelo(s) selecionado(s) em '
-                f'{len(capacidades_selecionadas)} capacidade(s).'
-                f'</div>',
-                unsafe_allow_html=True,
+            selecionados_ids = set(
+                str(x)
+                for x in st.session_state.get(
+                    "cliente_equipamentos_selecionados",
+                    [],
+                )
             )
 
-            with st.expander("Ver modelos selecionados"):
-                for opcao in opcoes_equipamentos:
-                    st.write(
-                        f'**{opcao["descricao"]}** — '
-                        f'{dinheiro(opcao["preco"])}'
+            capacidade = st.selectbox(
+                "Capacidade para visualizar",
+                CAPACIDADES,
+                key="cliente_capacidade_compra",
+            )
+
+            mostrar_referencia_capacidade(capacidade)
+
+            ids_ativos = {
+                str(opcao["id"])
+                for opcao in todos_ativos
+            }
+
+            selecionados_ids = {
+                eid
+                for eid in selecionados_ids
+                if eid in ids_ativos
+            }
+
+            opcoes_disponiveis = [
+                opcao
+                for opcao in todos_ativos
+                if opcao.get("capacidade") == capacidade
+            ]
+
+            opcoes_disponiveis.sort(
+                key=lambda item: (
+                    float(item.get("preco", 0) or 0),
+                    item.get("marca", "").lower(),
+                    item.get("tipo", "").lower(),
+                )
+            )
+
+            if opcoes_disponiveis:
+                st.caption(
+                    "Marque os modelos desejados. Você pode trocar os BTUs "
+                    "e continuar selecionando sem perder as escolhas anteriores."
+                )
+
+                for opcao in opcoes_disponiveis:
+                    eid = str(opcao["id"])
+                    widget_key = f"cliente_eq_visivel_{eid}"
+
+                    if widget_key not in st.session_state:
+                        st.session_state[widget_key] = eid in selecionados_ids
+
+                    marcado = st.checkbox(
+                        f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}',
+                        key=widget_key,
                     )
-        else:
-            st.markdown(
-                '<div class="capacity-note">'
-                'Nenhum modelo selecionado ainda.'
-                '</div>',
-                unsafe_allow_html=True,
+
+                    if marcado:
+                        selecionados_ids.add(eid)
+                    else:
+                        selecionados_ids.discard(eid)
+
+            else:
+                st.info(
+                    f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento."
+                )
+
+            st.session_state["cliente_equipamentos_selecionados"] = sorted(
+                selecionados_ids
             )
 
-        st.markdown(
-            f"""
-            <div class="orange-card">
-              <div class="card-title">Valores dos equipamentos</div>
-              <div class="card-text">{config["regras"].get("texto_equipamento","")}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            opcoes_equipamentos = [
+                opcao
+                for opcao in todos_ativos
+                if str(opcao["id"]) in selecionados_ids
+            ]
+
+            opcoes_equipamentos.sort(
+                key=lambda item: (
+                    BTU_NUM.get(
+                        item.get("capacidade"),
+                        999999,
+                    ),
+                    float(item.get("preco", 0) or 0),
+                    item.get("marca", "").lower(),
+                )
+            )
+
+            if opcoes_equipamentos:
+                capacidades_selecionadas = []
+
+                for opcao in opcoes_equipamentos:
+                    cap = opcao.get("capacidade", "")
+                    if cap and cap not in capacidades_selecionadas:
+                        capacidades_selecionadas.append(cap)
+
+                st.markdown(
+                    f'<div class="capacity-ok">'
+                    f'{len(opcoes_equipamentos)} modelo(s) selecionado(s) em '
+                    f'{len(capacidades_selecionadas)} capacidade(s).'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                with st.expander("Ver modelos selecionados"):
+                    for opcao in opcoes_equipamentos:
+                        st.write(
+                            f'**{opcao["descricao"]}** — '
+                            f'{dinheiro(opcao["preco"])}'
+                        )
+            else:
+                st.markdown(
+                    '<div class="capacity-note">'
+                    'Nenhum modelo selecionado ainda.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                """
+                <div class="orange-card">
+                  <div class="card-title">Orçamento comparativo</div>
+                  <div class="card-text">
+                    As opções escolhidas serão apresentadas separadamente.
+                    Os preços dos aparelhos não serão somados entre si.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     else:
-        # Se não estiver no modo de compra, não usa alternativas de equipamentos.
         opcoes_capacidade = CAPACIDADES + ["Não sei"]
-        garantir_opcao_valida("cliente_capacidade", opcoes_capacidade)
+        garantir_opcao_valida(
+            "cliente_capacidade",
+            opcoes_capacidade,
+        )
 
         capacidade = st.selectbox(
             "Capacidade do aparelho",
@@ -2525,19 +2648,69 @@ def pagina_cliente():
             st.warning("Informe um telefone/WhatsApp.")
             return
 
-        if not servicos and not opcoes_equipamentos:
-            st.warning("Selecione pelo menos um serviço ou marque um aparelho para incluir no orçamento.")
+        if possui == "Não, quero comprar":
+            if modo_compra == "Escolher um aparelho" and equipamento is None:
+                st.warning("Escolha um aparelho para incluir no orçamento.")
+                return
+
+            if modo_compra == "Comparar aparelhos" and not opcoes_equipamentos:
+                st.warning("Marque pelo menos um aparelho para comparar.")
+                return
+
+        elif not servicos:
+            st.warning("Selecione pelo menos um serviço.")
             return
 
         itens = []
 
-        cap_calculo = capacidade if capacidade in CAPACIDADES else None
+        # -------------------------------------------------
+        # VENDA DE UM APARELHO ESPECÍFICO
+        # -------------------------------------------------
+        if (
+            possui == "Não, quero comprar"
+            and modo_compra == "Escolher um aparelho"
+            and equipamento is not None
+        ):
+            cap_calculo = equipamento.get("capacidade")
 
-        # Quando há aparelhos para compra, os serviços ficam associados
-        # a cada alternativa, usando a capacidade específica de cada modelo.
-        # Assim, 12.000 e 18.000 BTUs podem coexistir no mesmo orçamento
-        # sem misturar os valores.
-        if possui == "Não, quero comprar" and opcoes_equipamentos:
+            itens.append(
+                montar_item(
+                    equipamento.get("descricao", "Ar-condicionado"),
+                    1,
+                    "equipamento",
+                    equipamento.get("preco", 0),
+                    origem="equipamento",
+                )
+            )
+
+            for nome_servico in servicos:
+                dados = config["servicos"][nome_servico]
+                valor = float(
+                    dados.get("precos", {}).get(
+                        cap_calculo,
+                        0,
+                    )
+                    or 0
+                )
+
+                itens.append(
+                    montar_item(
+                        f"{nome_servico} • {cap_calculo}",
+                        1,
+                        "serviço",
+                        valor,
+                        origem="servico",
+                    )
+                )
+
+        # -------------------------------------------------
+        # COMPARAÇÃO ENTRE VÁRIOS APARELHOS
+        # -------------------------------------------------
+        elif (
+            possui == "Não, quero comprar"
+            and modo_compra == "Comparar aparelhos"
+            and opcoes_equipamentos
+        ):
             opcoes_com_servicos = []
 
             for opcao in opcoes_equipamentos:
@@ -2567,36 +2740,48 @@ def pagina_cliente():
                     float(s.get("valor", 0) or 0)
                     for s in servicos_opcao
                 )
+
                 opcoes_com_servicos.append(opcao_final)
 
             opcoes_equipamentos = opcoes_com_servicos
 
-        elif cap_calculo:
-            for nome_servico in servicos:
-                dados = config["servicos"][nome_servico]
-                valor = float(
-                    dados.get("precos", {}).get(cap_calculo, 0) or 0
-                )
-                itens.append(
-                    montar_item(
-                        f"{nome_servico} • {cap_calculo}",
-                        1,
-                        "serviço",
-                        valor,
-                        origem="servico",
-                    )
-                )
+        # -------------------------------------------------
+        # CLIENTE JÁ POSSUI / ESTÁ AVALIANDO
+        # -------------------------------------------------
         else:
-            for nome_servico in servicos:
-                itens.append(
-                    montar_item(
-                        f"{nome_servico} • capacidade a confirmar",
-                        1,
-                        "serviço",
-                        0,
-                        origem="servico",
+            cap_calculo = capacidade if capacidade in CAPACIDADES else None
+
+            if cap_calculo:
+                for nome_servico in servicos:
+                    dados = config["servicos"][nome_servico]
+                    valor = float(
+                        dados.get("precos", {}).get(
+                            cap_calculo,
+                            0,
+                        )
+                        or 0
                     )
-                )
+
+                    itens.append(
+                        montar_item(
+                            f"{nome_servico} • {cap_calculo}",
+                            1,
+                            "serviço",
+                            valor,
+                            origem="servico",
+                        )
+                    )
+            else:
+                for nome_servico in servicos:
+                    itens.append(
+                        montar_item(
+                            f"{nome_servico} • capacidade a confirmar",
+                            1,
+                            "serviço",
+                            0,
+                            origem="servico",
+                        )
+                    )
 
         if tipo_imovel == "Apartamento" and int(andar) >= 2:
             valor_andar = float(
@@ -2634,6 +2819,7 @@ def pagina_cliente():
             "andar": int(andar) if tipo_imovel == "Apartamento" else None,
             "area_ambiente": area,
             "equipamento_id": equipamento_id,
+            "modo_compra": modo_compra,
             "opcoes_equipamentos": opcoes_equipamentos,
             "itens": itens,
             "adicional": {
@@ -2667,7 +2853,18 @@ def pagina_cliente():
         opcoes_pdf = ultimo.get("opcoes_equipamentos", [])
 
         if opcoes_pdf:
-            st.metric("Itens comuns do orçamento", dinheiro(total))
+            if total > 0:
+                st.metric(
+                    "Itens comuns do orçamento",
+                    dinheiro(total),
+                )
+            else:
+                st.markdown(
+                    '<div class="capacity-note">'
+                    'Orçamento comparativo de equipamentos.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
         else:
             st.metric("Total estimado", dinheiro(total))
 
