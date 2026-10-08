@@ -468,6 +468,7 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_nome",
     "cliente_telefone",
     "cliente_cidade",
+    "cliente_equipamentos_selecionados",
 ]
 
 LOCAL_STORAGE = LocalStorage() if LocalStorage is not None else None
@@ -535,7 +536,7 @@ def restaurar_rascunho_cliente():
     for campo, valor in dados.items():
         if (
             campo in CLIENT_DRAFT_FIELDS
-            or str(campo).startswith("cliente_eq_")
+            or str(campo).startswith("cliente_eq_visivel_")
         ) and campo not in st.session_state:
             st.session_state[campo] = valor
             alterou = True
@@ -565,7 +566,7 @@ def salvar_rascunho_cliente():
 
     # Também preserva as seleções individuais de aparelhos.
     for campo, valor in st.session_state.items():
-        if str(campo).startswith("cliente_eq_"):
+        if str(campo).startswith("cliente_eq_visivel_"):
             dados[campo] = bool(valor)
 
     if not dados:
@@ -613,9 +614,10 @@ def limpar_rascunho_cliente():
         st.session_state.pop(campo, None)
 
     for campo in list(st.session_state.keys()):
-        if str(campo).startswith("cliente_eq_"):
+        if str(campo).startswith("cliente_eq_visivel_"):
             st.session_state.pop(campo, None)
 
+    st.session_state.pop("cliente_equipamentos_selecionados", None)
     st.session_state.pop("_rascunho_ultima_assinatura", None)
     st.session_state["_rascunho_restaurado"] = True
 
@@ -2251,6 +2253,19 @@ def pagina_cliente():
     if possui == "Não, quero comprar":
         garantir_opcao_valida("cliente_capacidade_compra", CAPACIDADES)
 
+        # Lista persistente independente dos checkboxes visíveis.
+        # Isso evita perder seleções quando o filtro de BTUs muda.
+        if "cliente_equipamentos_selecionados" not in st.session_state:
+            st.session_state["cliente_equipamentos_selecionados"] = []
+
+        selecionados_ids = set(
+            str(x)
+            for x in st.session_state.get(
+                "cliente_equipamentos_selecionados",
+                [],
+            )
+        )
+
         capacidade = st.selectbox(
             "Capacidade para visualizar",
             CAPACIDADES,
@@ -2259,11 +2274,9 @@ def pagina_cliente():
 
         mostrar_referencia_capacidade(capacidade)
 
-        # Todos os aparelhos ativos ficam disponíveis para seleção persistente,
-        # mesmo quando o usuário troca o filtro de BTUs.
         todos_ativos = [
             {
-                "id": eid,
+                "id": str(eid),
                 "marca": eq.get("marca", ""),
                 "capacidade": eq.get("capacidade", ""),
                 "tipo": eq.get("tipo", ""),
@@ -2273,6 +2286,14 @@ def pagina_cliente():
             for eid, eq in config["equipamentos"].items()
             if eq.get("ativo", False)
         ]
+
+        ids_ativos = {str(opcao["id"]) for opcao in todos_ativos}
+
+        # Remove apenas IDs de aparelhos que deixaram de existir/estar ativos.
+        selecionados_ids = {
+            eid for eid in selecionados_ids
+            if eid in ids_ativos
+        }
 
         opcoes_disponiveis = [
             opcao
@@ -2290,31 +2311,43 @@ def pagina_cliente():
 
         if opcoes_disponiveis:
             st.caption(
-                "Marque os modelos desejados. Você pode trocar os BTUs acima "
-                "e continuar selecionando sem perder os anteriores."
+                "Marque os modelos desejados. Ao trocar os BTUs, "
+                "as escolhas anteriores continuam salvas neste orçamento."
             )
 
             for opcao in opcoes_disponiveis:
                 eid = str(opcao["id"])
+                widget_key = f"cliente_eq_visivel_{eid}"
 
-                st.checkbox(
+                # Ao voltar para esta capacidade, recria o checkbox
+                # exatamente com o estado persistente salvo.
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = eid in selecionados_ids
+
+                marcado = st.checkbox(
                     f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}',
-                    key=f"cliente_eq_{eid}",
+                    key=widget_key,
                 )
+
+                if marcado:
+                    selecionados_ids.add(eid)
+                else:
+                    selecionados_ids.discard(eid)
+
         else:
             st.info(
                 f"Nenhum aparelho de {capacidade} está ativo no catálogo no momento."
             )
 
-        # Reúne TODAS as opções já marcadas, inclusive capacidades que
-        # não estão visíveis no filtro atual.
+        # Salva o estado em uma chave que NÃO pertence a widget.
+        st.session_state["cliente_equipamentos_selecionados"] = sorted(
+            selecionados_ids
+        )
+
         opcoes_equipamentos = [
             opcao
             for opcao in todos_ativos
-            if st.session_state.get(
-                f'cliente_eq_{str(opcao["id"])}',
-                False,
-            )
+            if str(opcao["id"]) in selecionados_ids
         ]
 
         opcoes_equipamentos.sort(
@@ -2327,6 +2360,7 @@ def pagina_cliente():
 
         if opcoes_equipamentos:
             capacidades_selecionadas = []
+
             for opcao in opcoes_equipamentos:
                 cap = opcao.get("capacidade", "")
                 if cap and cap not in capacidades_selecionadas:
@@ -2363,14 +2397,18 @@ def pagina_cliente():
             """,
             unsafe_allow_html=True,
         )
+
     else:
+        # Se não estiver no modo de compra, não usa alternativas de equipamentos.
         opcoes_capacidade = CAPACIDADES + ["Não sei"]
         garantir_opcao_valida("cliente_capacidade", opcoes_capacidade)
+
         capacidade = st.selectbox(
             "Capacidade do aparelho",
             opcoes_capacidade,
             key="cliente_capacidade",
         )
+
         mostrar_referencia_capacidade(capacidade)
 
     secao("Serviços", "Selecione um ou mais serviços.")
