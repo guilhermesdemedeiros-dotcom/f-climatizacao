@@ -532,9 +532,12 @@ def restaurar_rascunho_cliente():
         return
 
     alterou = False
-    for campo in CLIENT_DRAFT_FIELDS:
-        if campo in dados and campo not in st.session_state:
-            st.session_state[campo] = dados[campo]
+    for campo, valor in dados.items():
+        if (
+            campo in CLIENT_DRAFT_FIELDS
+            or str(campo).startswith("cliente_eq_")
+        ) and campo not in st.session_state:
+            st.session_state[campo] = valor
             alterou = True
 
     st.session_state["_rascunho_restaurado"] = True
@@ -559,6 +562,11 @@ def salvar_rascunho_cliente():
             if isinstance(valor, tuple):
                 valor = list(valor)
             dados[campo] = valor
+
+    # Também preserva as seleções individuais de aparelhos.
+    for campo, valor in st.session_state.items():
+        if str(campo).startswith("cliente_eq_"):
+            dados[campo] = bool(valor)
 
     if not dados:
         return
@@ -603,6 +611,10 @@ def limpar_rascunho_cliente():
 
     for campo in CLIENT_DRAFT_FIELDS:
         st.session_state.pop(campo, None)
+
+    for campo in list(st.session_state.keys()):
+        if str(campo).startswith("cliente_eq_"):
+            st.session_state.pop(campo, None)
 
     st.session_state.pop("_rascunho_ultima_assinatura", None)
     st.session_state["_rascunho_restaurado"] = True
@@ -2220,7 +2232,7 @@ def pagina_cliente():
 
         mostrar_referencia_capacidade(capacidade)
 
-        opcoes_equipamentos = [
+        opcoes_disponiveis = [
             {
                 "id": eid,
                 "marca": eq.get("marca", ""),
@@ -2234,27 +2246,40 @@ def pagina_cliente():
             and eq.get("capacidade") == capacidade
         ]
 
-        opcoes_equipamentos.sort(
+        opcoes_disponiveis.sort(
             key=lambda item: (
                 float(item.get("preco", 0) or 0),
                 item.get("marca", "").lower(),
             )
         )
 
-        if opcoes_equipamentos:
+        if opcoes_disponiveis:
             st.caption(
-                f"{len(opcoes_equipamentos)} opção(ões) de {capacidade} disponível(is). "
-                "Todas serão apresentadas separadamente no orçamento."
+                "Marque um ou mais modelos para incluir como alternativas no orçamento."
             )
 
-            for opcao in opcoes_equipamentos:
+            for opcao in opcoes_disponiveis:
+                eid = str(opcao["id"])
+                selecionado = st.checkbox(
+                    f'{opcao["descricao"]} — {dinheiro(opcao["preco"])}',
+                    key=f"cliente_eq_{eid}",
+                )
+
+                if selecionado:
+                    opcoes_equipamentos.append(opcao)
+
+            if opcoes_equipamentos:
                 st.markdown(
-                    (
-                        '<div class="equipment-option">'
-                        f'<div class="equipment-option-name">{opcao["descricao"]}</div>'
-                        f'<div class="equipment-option-price">{dinheiro(opcao["preco"])}</div>'
-                        '</div>'
-                    ),
+                    f'<div class="capacity-ok">'
+                    f'{len(opcoes_equipamentos)} modelo(s) selecionado(s) para o orçamento.'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    '<div class="capacity-note">'
+                    'Nenhum modelo selecionado ainda.'
+                    '</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -2397,7 +2422,7 @@ def pagina_cliente():
             return
 
         if not servicos and not opcoes_equipamentos:
-            st.warning("Selecione pelo menos um serviço ou uma capacidade com aparelho disponível.")
+            st.warning("Selecione pelo menos um serviço ou marque um aparelho para incluir no orçamento.")
             return
 
         itens = []
