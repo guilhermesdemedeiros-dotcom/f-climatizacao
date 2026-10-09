@@ -12,6 +12,7 @@ import os
 import copy
 import uuid
 import time
+from contextlib import contextmanager
 
 try:
     from streamlit_local_storage import LocalStorage
@@ -50,6 +51,7 @@ BRANCH = "main"
 CONFIG_FILE = "config.json"
 BUDGETS_FILE = "orcamentos.json"
 FINANCE_FILE = "financeiro.json"
+BUDGET_META_FILE = "orcamentos_meta.json"
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
@@ -1149,10 +1151,17 @@ def alterar_status_orcamento(
 ):
     numero = str(orcamento.get("numero", "")).zfill(4)
     status_anterior = orcamento.get("status", "Orçamento")
+
+    if novo_status in ("Pedido de venda", "Faturado / Concluído"):
+        if len(orcamento.get("opcoes_equipamentos", [])) > 1:
+            raise ValueError(
+                "Antes de confirmar como pedido ou faturar, deixe somente uma opção de aparelho no orçamento."
+            )
+
+    agora_status = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M")
     orcamento["status"] = novo_status
-    orcamento["atualizado_em"] = datetime.now(
-        FUSO_BRASILIA
-    ).strftime("%d/%m/%Y %H:%M")
+    orcamento["data_status"] = agora_status
+    orcamento["atualizado_em"] = agora_status
 
     if novo_status == "Faturado / Concluído":
         financeiro.setdefault("movimentacoes", {})[
@@ -1174,14 +1183,98 @@ def alterar_status_orcamento(
     salvar_financeiro(financeiro)
 
 
-def proximo_numero(lista):
-    maior = 0
+def carregar_meta_orcamentos():
+    try:
+        content, _ = github_get_file(DATA_REPO, BUDGET_META_FILE)
+        if content is None:
+            return {"ultimo_numero": 0}
+        dados = json.loads(content)
+        if not isinstance(dados, dict):
+            return {"ultimo_numero": 0}
+        dados.setdefault("ultimo_numero", 0)
+        return dados
+    except Exception:
+        return {"ultimo_numero": 0}
+
+
+def salvar_meta_orcamentos(meta):
+    texto = json.dumps(meta, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(DATA_REPO, BUDGET_META_FILE)
+    github_put_file(
+        DATA_REPO,
+        BUDGET_META_FILE,
+        texto,
+        "Atualiza contador permanente de orçamentos",
+        sha=sha,
+    )
+
+
+def reservar_proximo_numero(lista):
+    """
+    Reserva um número novo e nunca reutiliza números apagados.
+    """
+    meta = carregar_meta_orcamentos()
+
+    maior_existente = 0
     for o in lista:
         try:
-            maior = max(maior, int(str(o.get("numero", "0")).lstrip("0") or "0"))
+            maior_existente = max(
+                maior_existente,
+                int(str(o.get("numero", "0")).lstrip("0") or "0"),
+            )
         except Exception:
             pass
-    return f"{maior + 1:04d}"
+
+    ultimo = max(
+        int(meta.get("ultimo_numero", 0) or 0),
+        maior_existente,
+    )
+    proximo = ultimo + 1
+    meta["ultimo_numero"] = proximo
+    salvar_meta_orcamentos(meta)
+
+    return f"{proximo:04d}"
+
+
+def resetar_base_orcamentos():
+    """
+    Arquiva integralmente a base atual e reinicia a numeração em 0001.
+    Nenhum número será reutilizado dentro do novo ciclo.
+    """
+    orcamentos = carregar_orcamentos()
+    financeiro = carregar_financeiro()
+    meta = carregar_meta_orcamentos()
+
+    agora = datetime.now(FUSO_BRASILIA)
+    carimbo = agora.strftime("%Y%m%d_%H%M%S")
+    arquivo_backup = f"arquivos/reset_{carimbo}.json"
+
+    pacote = {
+        "criado_em": agora.strftime("%d/%m/%Y %H:%M"),
+        "orcamentos": orcamentos,
+        "financeiro": financeiro,
+        "meta_orcamentos": meta,
+    }
+
+    github_put_file(
+        DATA_REPO,
+        arquivo_backup,
+        json.dumps(pacote, ensure_ascii=False, indent=2),
+        "Arquivo automático antes de resetar a base de orçamentos",
+        sha=None,
+    )
+
+    salvar_orcamentos([])
+    salvar_financeiro(
+        {
+            "custos_materiais": financeiro.get("custos_materiais", {}),
+            "custos_equipamentos": financeiro.get("custos_equipamentos", {}),
+            "movimentacoes": {},
+        }
+    )
+    salvar_meta_orcamentos({"ultimo_numero": 0})
+
+    return arquivo_backup
 
 
 # =========================================================
@@ -1265,6 +1358,43 @@ def secao(titulo, subtitulo=""):
         """,
         unsafe_allow_html=True,
     )
+
+
+@contextmanager
+def tela_carregamento(texto="Carregando..."):
+    placeholder = st.empty()
+    logo = logo_data_uri()
+    logo_html = (
+        f'<img src="{logo}" style="width:42px;height:42px;object-fit:contain;">'
+        if logo
+        else '<div style="width:42px;height:42px;"></div>'
+    )
+
+    placeholder.markdown(
+        f"""
+        <div style="
+            display:flex;
+            align-items:center;
+            gap:12px;
+            padding:13px 15px;
+            margin:8px 0 12px 0;
+            border-radius:16px;
+            border:1px solid rgba(8,120,232,.38);
+            background:linear-gradient(135deg,rgba(8,120,232,.15),rgba(14,20,30,.98));
+        ">
+          {logo_html}
+          <div>
+            <div style="font-size:12px;font-weight:850;color:#fff;">F CLIMATIZAÇÃO</div>
+            <div style="font-size:11px;color:#8fc9ff;margin-top:2px;">{texto}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    try:
+        yield
+    finally:
+        placeholder.empty()
 
 
 
@@ -1974,15 +2104,76 @@ def montar_item(
 
 def aba_orcamentos():
     secao(
-        "Orçamentos",
-        "Edite preços, itens e descontos diretamente no orçamento.",
+        "Gestão comercial",
+        "Orçamentos, pedidos confirmados e vendas concluídas em listas separadas.",
     )
 
-    orcamentos = carregar_orcamentos()
+    with tela_carregamento("Carregando gestão comercial..."):
+        orcamentos = carregar_orcamentos()
+        financeiro = carregar_financeiro()
+
+    with st.expander("Ferramentas da base"):
+        st.caption(
+            "O reset arquiva todos os orçamentos e movimentações atuais no repositório privado, "
+            "limpa a base ativa e reinicia a numeração em 0001."
+        )
+        confirmar_reset = st.text_input(
+            'Para resetar, digite RESETAR',
+            key="confirmar_reset_base",
+        )
+        if st.button(
+            "RESETAR BASE DE ORÇAMENTOS",
+            use_container_width=True,
+            key="btn_reset_base_orcamentos",
+        ):
+            if confirmar_reset.strip().upper() != "RESETAR":
+                st.warning("Digite RESETAR para confirmar.")
+            else:
+                try:
+                    with tela_carregamento("Arquivando dados e reiniciando numeração..."):
+                        arquivo = resetar_base_orcamentos()
+                    st.success(
+                        f"Base reiniciada em 0001. Backup preservado em {arquivo}."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível resetar a base: {e}")
 
     if not orcamentos:
-        st.info("Nenhum orçamento salvo ainda.")
+        st.info("Nenhum registro comercial salvo ainda.")
         return
+
+    status_view = st.radio(
+        "Visualizar",
+        ["Orçamentos", "Pedidos de venda", "Vendas concluídas"],
+        horizontal=True,
+        key="adm_comercial_status_view",
+    )
+
+    mapa_status = {
+        "Orçamentos": "Orçamento",
+        "Pedidos de venda": "Pedido de venda",
+        "Vendas concluídas": "Faturado / Concluído",
+    }
+    status_filtro = mapa_status[status_view]
+
+    contagens = {
+        "Orçamento": 0,
+        "Pedido de venda": 0,
+        "Faturado / Concluído": 0,
+    }
+
+    for item_status in orcamentos:
+        estado = item_status.get("status", "Orçamento")
+        if estado not in contagens:
+            estado = "Orçamento"
+        contagens[estado] += 1
+
+    st.caption(
+        f'Orçamentos: {contagens["Orçamento"]} • '
+        f'Pedidos: {contagens["Pedido de venda"]} • '
+        f'Concluídas: {contagens["Faturado / Concluído"]}'
+    )
 
     busca = st.text_input(
         "Buscar por número, cliente ou telefone",
@@ -1996,6 +2187,13 @@ def aba_orcamentos():
         key=lambda x: str(x.get("numero", "")),
         reverse=True,
     ):
+        estado = o.get("status", "Orçamento")
+        if estado not in mapa_status.values():
+            estado = "Orçamento"
+
+        if estado != status_filtro:
+            continue
+
         texto = " ".join(
             [
                 str(o.get("numero", "")),
@@ -2007,6 +2205,10 @@ def aba_orcamentos():
         if not busca or busca in texto:
             filtrados.append(o)
 
+    if not filtrados:
+        st.info(f"Nenhum registro em {status_view.lower()} com esse filtro.")
+        return
+
     for o in filtrados:
         numero = str(o.get("numero", "----")).zfill(4)
         nome = o.get("cliente", {}).get("nome", "Cliente")
@@ -2017,16 +2219,20 @@ def aba_orcamentos():
         else:
             rotulo_total = dinheiro(total_orcamento(o))
 
+        tipo_rotulo = {
+            "Orçamento": "Orçamento",
+            "Pedido de venda": "Pedido",
+            "Faturado / Concluído": "Venda",
+        }.get(o.get("status", "Orçamento"), "Orçamento")
+
         with st.expander(
-            f"Orçamento {numero} • {nome} • {rotulo_total}"
+            f"{tipo_rotulo} {numero} • {nome} • {rotulo_total}"
         ):
             st.caption(
                 f"{o.get('data','')} • "
                 f"{o.get('cliente',{}).get('telefone','')} • "
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
-
-            financeiro = carregar_financeiro()
 
             status_opcoes = [
                 "Orçamento",
@@ -3276,26 +3482,31 @@ def pagina_central_faturamento():
         unsafe_allow_html=True,
     )
 
-    financeiro = carregar_financeiro()
+    with tela_carregamento("Carregando dados financeiros..."):
+        financeiro = carregar_financeiro()
+        orcamentos = carregar_orcamentos()
+
     movimentacoes = list(
         financeiro.get("movimentacoes", {}).values()
     )
 
-    if not movimentacoes:
-        st.info(
-            "Nenhuma venda faturada no momento. "
-            "Quando um orçamento for marcado como Faturado / Concluído, "
-            "ele aparecerá aqui."
-        )
-        return
+    anos_encontrados = {
+        ano
+        for mov in movimentacoes
+        for _, ano in [extrair_mes_ano(mov.get("data_faturamento"))]
+        if ano is not None
+    }
+
+    for orc in orcamentos:
+        if orc.get("status") == "Pedido de venda":
+            _, ano = extrair_mes_ano(
+                orc.get("data_status") or orc.get("atualizado_em") or orc.get("data")
+            )
+            if ano is not None:
+                anos_encontrados.add(ano)
 
     anos_disponiveis = sorted(
-        {
-            ano
-            for mov in movimentacoes
-            for _, ano in [extrair_mes_ano(mov.get("data_faturamento"))]
-            if ano is not None
-        },
+        anos_encontrados,
         reverse=True,
     )
 
@@ -3346,6 +3557,37 @@ def pagina_central_faturamento():
 
         filtradas.append(mov)
 
+    pedidos_filtrados = []
+
+    for orc in orcamentos:
+        if orc.get("status") != "Pedido de venda":
+            continue
+
+        mes_pedido, ano_pedido = extrair_mes_ano(
+            orc.get("data_status")
+            or orc.get("atualizado_em")
+            or orc.get("data")
+        )
+
+        if ano_pedido != ano_filtro:
+            continue
+
+        if mes_filtro is not None and mes_pedido != mes_filtro:
+            continue
+
+        pedidos_filtrados.append(orc)
+
+    valor_pedidos = 0.0
+    for pedido in pedidos_filtrados:
+        opcoes_pedido = pedido.get("opcoes_equipamentos", [])
+        if len(opcoes_pedido) == 1:
+            valor_pedidos += total_opcao_orcamento(
+                pedido,
+                opcoes_pedido[0],
+            )
+        elif not opcoes_pedido:
+            valor_pedidos += total_orcamento(pedido)
+
     receita = sum(
         float(m.get("receita", 0) or 0)
         for m in filtradas
@@ -3371,7 +3613,15 @@ def pagina_central_faturamento():
         f"""
         <div class="finance-grid">
           <div class="finance-card">
-            <div class="finance-card-label">Faturamento</div>
+            <div class="finance-card-label">Pedidos confirmados</div>
+            <div class="finance-card-value orange">{dinheiro(valor_pedidos)}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Pedidos em aberto</div>
+            <div class="finance-card-value">{len(pedidos_filtrados)}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Venda concluída</div>
             <div class="finance-card-value blue">{dinheiro(receita)}</div>
           </div>
           <div class="finance-card">
@@ -3398,6 +3648,43 @@ def pagina_central_faturamento():
         """,
         unsafe_allow_html=True,
     )
+
+    secao(
+        "Pedidos de venda",
+        "Valores já confirmados, mas ainda não faturados.",
+    )
+
+    if pedidos_filtrados:
+        for pedido in sorted(
+            pedidos_filtrados,
+            key=lambda x: str(x.get("numero", "")),
+            reverse=True,
+        ):
+            opcoes_pedido = pedido.get("opcoes_equipamentos", [])
+            if len(opcoes_pedido) == 1:
+                valor_pedido = total_opcao_orcamento(
+                    pedido,
+                    opcoes_pedido[0],
+                )
+            else:
+                valor_pedido = total_orcamento(pedido)
+
+            st.markdown(
+                f"""
+                <div class="finance-pay">
+                  <div class="finance-pay-name">
+                    Pedido {str(pedido.get("numero","")).zfill(4)} •
+                    {pedido.get("cliente",{}).get("nome","Cliente")}
+                  </div>
+                  <div class="finance-pay-meta">
+                    {dinheiro(valor_pedido)} • aguardando faturamento
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("Nenhum pedido de venda neste período.")
 
     # -----------------------------------------------------
     # MÉTODOS DE PAGAMENTO
@@ -3628,7 +3915,7 @@ def pagina_admin():
 
     tabs = st.tabs(
         [
-            "Orçamentos",
+            "Gestão comercial",
             "Serviços",
             "Materiais",
             "Aparelhos",
@@ -5279,7 +5566,7 @@ def pagina_cliente():
             )
 
         orcamentos = carregar_orcamentos()
-        numero = proximo_numero(orcamentos)
+        numero = reservar_proximo_numero(orcamentos)
 
         novo = {
             "numero": numero,
@@ -5296,6 +5583,7 @@ def pagina_cliente():
             "area_ambiente": area,
             "equipamento_id": equipamento_id,
             "modo_compra": modo_compra,
+            "status": "Orçamento",
             "opcoes_equipamentos": opcoes_equipamentos,
             "itens": itens,
             "adicional": {
