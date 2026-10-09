@@ -68,6 +68,17 @@
         "18.000 BTUs": 0.0,
         "24.000 BTUs": 0.0
       }
+    },
+    "Instalação": {
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "Instalação de ar-condicionado até 2 metros de linha. Materiais são cobrados separadamente quando necessários.",
+      "precos": {
+        "9.000 BTUs": 280.0,
+        "12.000 BTUs": 280.0,
+        "18.000 BTUs": 350.0,
+        "24.000 BTUs": 400.0
+      }
     }
   },
   "materiais": {
