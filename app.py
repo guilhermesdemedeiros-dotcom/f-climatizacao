@@ -1900,35 +1900,147 @@ def aba_orcamentos():
 # =========================================================
 
 def aba_servicos():
-    secao("Serviços", "Ative, desative e edite os preços-base.")
+    secao(
+        "Serviços",
+        "Crie, renomeie, remova e edite preços dos serviços.",
+    )
 
-    for nome, dados in list(config["servicos"].items()):
+    st.caption(
+        "Alterações aqui afetam os próximos orçamentos e as futuras edições. "
+        "Orçamentos já salvos mantêm os dados registrados até serem editados."
+    )
+
+    reconstruidos = {}
+
+    for idx, (nome, dados) in enumerate(list(config["servicos"].items())):
         with st.expander(nome):
+            novo_nome = st.text_input(
+                "Nome do serviço",
+                value=nome,
+                key=f"serv_nome_{idx}_{nome}",
+            ).strip()
+
             dados["ativo"] = st.checkbox(
                 "Ativo",
                 value=bool(dados.get("ativo", True)),
-                key=f"serv_ativo_{nome}",
+                key=f"serv_ativo_{idx}_{nome}",
             )
+
             dados["mostrar_cliente"] = st.checkbox(
                 "Disponível para o cliente",
                 value=bool(dados.get("mostrar_cliente", True)),
-                key=f"serv_cliente_{nome}",
+                key=f"serv_cliente_{idx}_{nome}",
             )
+
             dados["descricao"] = st.text_area(
                 "Descrição",
                 value=dados.get("descricao", ""),
-                key=f"serv_desc_{nome}",
+                key=f"serv_desc_{idx}_{nome}",
             )
 
-            for cap in CAPACIDADES:
-                dados.setdefault("precos", {})
-                dados["precos"][cap] = st.number_input(
+            dados.setdefault("precos", {})
+
+            c1, c2 = st.columns(2)
+            for cap_idx, cap in enumerate(CAPACIDADES):
+                coluna = c1 if cap_idx % 2 == 0 else c2
+                with coluna:
+                    dados["precos"][cap] = st.number_input(
+                        cap,
+                        min_value=0.0,
+                        value=float(dados["precos"].get(cap, 0) or 0),
+                        step=10.0,
+                        key=f"serv_preco_{idx}_{nome}_{cap}",
+                    )
+
+            excluir = st.checkbox(
+                "Excluir este serviço",
+                value=False,
+                key=f"serv_excluir_{idx}_{nome}",
+            )
+
+            if excluir:
+                st.caption(
+                    "Ao salvar as alterações do sistema, este serviço será removido do catálogo."
+                )
+                continue
+
+            chave_final = novo_nome or nome
+
+            if chave_final in reconstruidos and chave_final != nome:
+                st.warning(
+                    "Já existe outro serviço com esse nome. "
+                    "Use um nome diferente antes de salvar."
+                )
+                chave_final = nome
+
+            reconstruidos[chave_final] = dados
+
+    config["servicos"] = reconstruidos
+
+    with st.expander("Adicionar novo serviço"):
+        novo_serv_nome = st.text_input(
+            "Nome do novo serviço",
+            key="novo_serv_catalogo_nome",
+        ).strip()
+
+        novo_serv_desc = st.text_area(
+            "Descrição",
+            key="novo_serv_catalogo_desc",
+        )
+
+        novo_serv_ativo = st.checkbox(
+            "Ativo",
+            value=True,
+            key="novo_serv_catalogo_ativo",
+        )
+
+        novo_serv_cliente = st.checkbox(
+            "Disponível para o cliente",
+            value=True,
+            key="novo_serv_catalogo_cliente",
+        )
+
+        novos_precos = {}
+
+        c1, c2 = st.columns(2)
+        for cap_idx, cap in enumerate(CAPACIDADES):
+            coluna = c1 if cap_idx % 2 == 0 else c2
+            with coluna:
+                novos_precos[cap] = st.number_input(
                     cap,
                     min_value=0.0,
-                    value=float(dados["precos"].get(cap, 0) or 0),
+                    value=0.0,
                     step=10.0,
-                    key=f"serv_preco_{nome}_{cap}",
+                    key=f"novo_serv_catalogo_preco_{cap}",
                 )
+
+        if st.button(
+            "Adicionar serviço",
+            type="primary",
+            use_container_width=True,
+            key="btn_novo_serv_catalogo",
+        ):
+            if not novo_serv_nome:
+                st.warning("Informe o nome do serviço.")
+            elif novo_serv_nome in config["servicos"]:
+                st.warning("Já existe um serviço com esse nome.")
+            else:
+                config["servicos"][novo_serv_nome] = {
+                    "ativo": bool(novo_serv_ativo),
+                    "mostrar_cliente": bool(novo_serv_cliente),
+                    "descricao": novo_serv_desc.strip(),
+                    "precos": {
+                        cap: float(valor)
+                        for cap, valor in novos_precos.items()
+                    },
+                }
+
+                try:
+                    salvar_config()
+                    st.success("Serviço criado e salvo.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar serviço: {e}")
 
 
 # =========================================================
