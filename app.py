@@ -633,6 +633,7 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_modo_compra",
     "cliente_equipamento_unico",
     "cliente_capacidade",
+    "cliente_capacidade_existente",
     "cliente_servicos",
     "cliente_materiais",
     "cliente_tipo_imovel",
@@ -1576,6 +1577,29 @@ def nome_equipamento(eq):
 # PDF
 # =========================================================
 
+
+def descricao_equipamento_com_instalacao(descricao):
+    texto = str(descricao or "Ar-condicionado").strip()
+    complemento = "Instalação inclusa até 2 m de linha"
+    if complemento.lower() not in texto.lower():
+        texto = f"{texto} • {complemento}"
+    return texto
+
+
+def situacao_tem_compra(situacao):
+    return situacao in (
+        "Não, quero comprar",
+        "Já tenho um e também quero comprar outro",
+    )
+
+
+def situacao_tem_aparelho_existente(situacao):
+    return situacao in (
+        "Sim, já tenho o aparelho",
+        "Já tenho um e também quero comprar outro",
+        "Ainda estou avaliando",
+    )
+
 def gerar_pdf(orcamento):
     buffer = BytesIO()
 
@@ -1849,6 +1873,10 @@ def gerar_pdf(orcamento):
             descricao_opcao = str(
                 opcao.get("descricao", "Ar-condicionado")
             )
+            if orcamento.get("instalacao_inclusa_equipamento"):
+                descricao_opcao = descricao_equipamento_com_instalacao(
+                    descricao_opcao
+                )
 
             if desconto_eq > 0:
                 descricao_opcao += (
@@ -1963,6 +1991,18 @@ def gerar_pdf(orcamento):
         ]
 
     destaques = []
+
+    if orcamento.get("instalacao_inclusa_equipamento"):
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>Equipamento fornecido pela F Climatização:</b> "
+                    "o preço do aparelho já inclui instalação padrão com até "
+                    "2 metros de linha entre evaporadora e condensadora.",
+                    normal,
+                )
+            ]
+        )
 
     if adicional.get("solicitado"):
         desc = adicional.get("descricao", "").strip()
@@ -2339,9 +2379,18 @@ def aba_orcamentos():
                 with st.expander(
                     item.get("descricao", f"Item {idx + 1}")
                 ):
+                    descricao_base_adm = item.get("descricao", "")
+                    if (
+                        item.get("origem") == "equipamento"
+                        and o.get("instalacao_inclusa_equipamento")
+                    ):
+                        descricao_base_adm = descricao_equipamento_com_instalacao(
+                            descricao_base_adm
+                        )
+
                     desc = st.text_input(
                         "Descrição",
-                        value=item.get("descricao", ""),
+                        value=descricao_base_adm,
                         key=f"adm_item_desc_{numero}_{iid}",
                     )
 
@@ -4232,7 +4281,7 @@ def editor_orcamento_cliente():
                     }
                 )
 
-        if edit_possui == "Não, quero comprar":
+        if situacao_tem_compra(edit_possui):
             modos_compra = [
                 "Escolher um aparelho",
                 "Comparar aparelhos",
@@ -4252,6 +4301,11 @@ def editor_orcamento_cliente():
                 index=modos_compra.index(modo_atual),
                 horizontal=True,
                 key=f"edit_modo_compra_{numero}",
+            )
+
+            st.info(
+                "Os aparelhos fornecidos pela F Climatização já incluem "
+                "instalação padrão com até 2 metros de linha."
             )
 
             if edit_modo_compra == "Escolher um aparelho":
@@ -4406,10 +4460,30 @@ def editor_orcamento_cliente():
                     with st.expander("Ver selecionados"):
                         for eq in edit_opcoes_comparacao:
                             st.write(
-                                f'**{eq["descricao"]}** — {dinheiro(eq["preco"])}'
+                                f'**{eq["descricao"]}** — {dinheiro(eq["preco"])} '
+                                f'• instalação inclusa até 2 m de linha'
                             )
 
+            if edit_possui == "Já tenho um e também quero comprar outro":
+                cap_existente_atual = orcamento.get(
+                    "capacidade_aparelho_existente",
+                    "Não sei",
+                )
+                opcoes_cap_existente = CAPACIDADES + ["Não sei"]
+                if cap_existente_atual not in opcoes_cap_existente:
+                    cap_existente_atual = "Não sei"
+
+                edit_capacidade_existente = st.selectbox(
+                    "Capacidade do aparelho que já possui",
+                    opcoes_cap_existente,
+                    index=opcoes_cap_existente.index(cap_existente_atual),
+                    key=f"edit_cap_existente_{numero}",
+                )
+            else:
+                edit_capacidade_existente = None
+
         else:
+            edit_capacidade_existente = None
             cap_atual = orcamento.get("capacidade")
             opcoes_capacidade = CAPACIDADES + ["Não sei"]
 
@@ -4437,10 +4511,33 @@ def editor_orcamento_cliente():
             and dados.get("mostrar_cliente", True)
         ]
 
+        if situacao_tem_compra(edit_possui):
+            servicos_ativos = [
+                nome
+                for nome in servicos_ativos
+                if nome.strip().lower() != "instalação"
+            ]
+
         servicos_opcoes = servicos_ativos[:]
         for nome in servicos_atuais:
+            # Não reoferece Instalação separada em compra simples.
+            if (
+                edit_possui == "Não, quero comprar"
+                and nome.strip().lower() == "instalação"
+            ):
+                continue
             if nome not in servicos_opcoes:
                 servicos_opcoes.append(nome)
+
+        if edit_possui == "Já tenho um e também quero comprar outro":
+            st.caption(
+                "Estes serviços são do aparelho que o cliente já possui. "
+                "O aparelho comprado já inclui instalação até 2 m de linha."
+            )
+        elif edit_possui == "Não, quero comprar":
+            st.caption(
+                "A instalação do aparelho comprado já está inclusa no preço."
+            )
 
         defaults_servicos = [
             nome
@@ -4578,7 +4675,7 @@ def editor_orcamento_cliente():
         capacidade_para_area = None
 
         if (
-            edit_possui == "Não, quero comprar"
+            situacao_tem_compra(edit_possui)
             and edit_modo_compra == "Escolher um aparelho"
             and edit_equipamento_unico
         ):
@@ -4737,12 +4834,25 @@ def editor_orcamento_cliente():
 
                 novos_itens.append(
                     montar_item(
-                        edit_equipamento_unico["descricao"],
+                        descricao_equipamento_com_instalacao(
+                            edit_equipamento_unico["descricao"]
+                        ),
                         1,
                         "equipamento",
                         edit_equipamento_unico["preco"],
                         origem="equipamento",
                     )
+                )
+
+                cap_servico_editor = (
+                    edit_capacidade_existente
+                    if edit_possui == "Já tenho um e também quero comprar outro"
+                    else nova_capacidade
+                )
+                cap_servico_editor = (
+                    cap_servico_editor
+                    if cap_servico_editor in CAPACIDADES
+                    else None
                 )
 
                 for nome_servico in edit_servicos:
@@ -4752,18 +4862,24 @@ def editor_orcamento_cliente():
                     )
                     valor = float(
                         dados_servico.get("precos", {}).get(
-                            nova_capacidade,
+                            cap_servico_editor,
                             precos_servicos_atuais.get(
                                 nome_servico,
                                 0,
                             ),
                         )
                         or 0
+                    ) if cap_servico_editor else 0.0
+
+                    descricao_servico = (
+                        f"{nome_servico} • {cap_servico_editor}"
+                        if cap_servico_editor
+                        else f"{nome_servico} • capacidade a confirmar"
                     )
 
                     novos_itens.append(
                         montar_item(
-                            f"{nome_servico} • {nova_capacidade}",
+                            descricao_servico,
                             1,
                             "serviço",
                             valor,
@@ -4785,30 +4901,34 @@ def editor_orcamento_cliente():
 
                     servicos_eq = []
 
-                    for nome_servico in edit_servicos:
-                        dados_servico = config.get("servicos", {}).get(
-                            nome_servico,
-                            {},
-                        )
-                        valor = float(
-                            dados_servico.get("precos", {}).get(
-                                cap_eq,
-                                precos_servicos_atuais.get(
-                                    nome_servico,
-                                    0,
-                                ),
+                    if edit_possui == "Não, quero comprar":
+                        for nome_servico in edit_servicos:
+                            dados_servico = config.get("servicos", {}).get(
+                                nome_servico,
+                                {},
                             )
-                            or 0
-                        )
+                            valor = float(
+                                dados_servico.get("precos", {}).get(
+                                    cap_eq,
+                                    precos_servicos_atuais.get(
+                                        nome_servico,
+                                        0,
+                                    ),
+                                )
+                                or 0
+                            )
 
-                        servicos_eq.append(
-                            {
-                                "descricao": f"{nome_servico} • {cap_eq}",
-                                "valor": valor,
-                            }
-                        )
+                            servicos_eq.append(
+                                {
+                                    "descricao": f"{nome_servico} • {cap_eq}",
+                                    "valor": valor,
+                                }
+                            )
 
                     nova_opcao = copy.deepcopy(eq)
+                    nova_opcao["descricao"] = descricao_equipamento_com_instalacao(
+                        nova_opcao.get("descricao", "Ar-condicionado")
+                    )
                     nova_opcao["servicos"] = servicos_eq
                     nova_opcao["total_servicos"] = sum(
                         float(s.get("valor", 0) or 0)
@@ -4821,6 +4941,39 @@ def editor_orcamento_cliente():
                     if len(capacidades_escolhidas) == 1
                     else "Várias capacidades"
                 )
+
+                if edit_possui == "Já tenho um e também quero comprar outro":
+                    cap_existente_editor = (
+                        edit_capacidade_existente
+                        if edit_capacidade_existente in CAPACIDADES
+                        else None
+                    )
+                    for nome_servico in edit_servicos:
+                        dados_servico = config.get("servicos", {}).get(
+                            nome_servico,
+                            {},
+                        )
+                        valor = float(
+                            dados_servico.get("precos", {}).get(
+                                cap_existente_editor,
+                                precos_servicos_atuais.get(nome_servico, 0),
+                            )
+                            or 0
+                        ) if cap_existente_editor else 0.0
+                        descricao = (
+                            f"{nome_servico} • {cap_existente_editor}"
+                            if cap_existente_editor
+                            else f"{nome_servico} • capacidade a confirmar"
+                        )
+                        novos_itens.append(
+                            montar_item(
+                                descricao,
+                                1,
+                                "serviço",
+                                valor,
+                                origem="servico",
+                            )
+                        )
 
         # Já possui / avaliando
         else:
@@ -4872,8 +5025,16 @@ def editor_orcamento_cliente():
         orcamento["possui_aparelho"] = edit_possui
         orcamento["modo_compra"] = (
             edit_modo_compra
-            if edit_possui == "Não, quero comprar"
+            if situacao_tem_compra(edit_possui)
             else None
+        )
+        orcamento["capacidade_aparelho_existente"] = (
+            edit_capacidade_existente
+            if edit_possui == "Já tenho um e também quero comprar outro"
+            else None
+        )
+        orcamento["instalacao_inclusa_equipamento"] = situacao_tem_compra(
+            edit_possui
         )
         orcamento["capacidade"] = nova_capacidade
         orcamento["equipamento_id"] = novo_equipamento_id
@@ -4965,6 +5126,7 @@ def pagina_cliente():
     opcoes_possui = [
         "Sim, já tenho o aparelho",
         "Não, quero comprar",
+        "Já tenho um e também quero comprar outro",
         "Ainda estou avaliando",
     ]
     garantir_opcao_valida("cliente_possui", opcoes_possui)
@@ -4980,7 +5142,7 @@ def pagina_cliente():
     opcoes_equipamentos = []
     modo_compra = None
 
-    if possui == "Não, quero comprar":
+    if situacao_tem_compra(possui):
         modos_compra = [
             "Escolher um aparelho",
             "Comparar aparelhos",
@@ -4992,6 +5154,20 @@ def pagina_cliente():
             modos_compra,
             horizontal=True,
             key="cliente_modo_compra",
+        )
+
+        st.markdown(
+            """
+            <div class="info-card">
+              <div class="card-title">Instalação já inclusa</div>
+              <div class="card-text">
+                Os aparelhos fornecidos pela F Climatização já incluem
+                instalação padrão com até 2 metros de linha entre evaporadora
+                e condensadora. A instalação não será cobrada novamente.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         todos_ativos = [
@@ -5191,7 +5367,8 @@ def pagina_cliente():
                     for opcao in opcoes_equipamentos:
                         st.write(
                             f'**{opcao["descricao"]}** — '
-                            f'{dinheiro(opcao["preco"])}'
+                            f'{dinheiro(opcao["preco"])}  '
+                            f'• instalação inclusa até 2 m de linha'
                         )
             else:
                 st.markdown(
@@ -5207,6 +5384,7 @@ def pagina_cliente():
                   <div class="card-title">Orçamento comparativo</div>
                   <div class="card-text">
                     As opções escolhidas serão apresentadas separadamente.
+                    Todos os aparelhos já incluem instalação padrão até 2 m de linha.
                     Os preços dos aparelhos não serão somados entre si.
                   </div>
                 </div>
@@ -5214,7 +5392,19 @@ def pagina_cliente():
                 unsafe_allow_html=True,
             )
 
+        if possui == "Já tenho um e também quero comprar outro":
+            st.markdown("#### Aparelho que você já possui")
+            capacidade_existente = st.selectbox(
+                "Capacidade do aparelho que já possui",
+                CAPACIDADES + ["Não sei"],
+                key="cliente_capacidade_existente",
+            )
+            mostrar_referencia_capacidade(capacidade_existente)
+        else:
+            capacidade_existente = None
+
     else:
+        capacidade_existente = None
         opcoes_capacidade = CAPACIDADES + ["Não sei"]
         garantir_opcao_valida(
             "cliente_capacidade",
@@ -5229,7 +5419,18 @@ def pagina_cliente():
 
         mostrar_referencia_capacidade(capacidade)
 
-    secao("Serviços", "Selecione um ou mais serviços.")
+    if possui == "Já tenho um e também quero comprar outro":
+        secao(
+            "Serviços para o aparelho que você já possui",
+            "O aparelho comprado da F Climatização já terá a instalação inclusa.",
+        )
+    elif possui == "Não, quero comprar":
+        secao(
+            "Serviços adicionais",
+            "A instalação padrão do aparelho comprado já está inclusa no preço.",
+        )
+    else:
+        secao("Serviços", "Selecione um ou mais serviços.")
 
     servicos_ativos = [
         nome
@@ -5237,10 +5438,24 @@ def pagina_cliente():
         if dados.get("ativo", True)
         and dados.get("mostrar_cliente", True)
     ]
+
+    # Na compra de aparelho da F Climatização, Instalação já está embutida.
+    # Em cenário misto, a instalação continua disponível para o aparelho que o cliente já possui.
+    if possui == "Não, quero comprar":
+        servicos_ativos = [
+            nome
+            for nome in servicos_ativos
+            if nome.strip().lower() != "instalação"
+        ]
+
     garantir_opcao_valida("cliente_servicos", servicos_ativos, multiplo=True)
 
     servicos = st.multiselect(
-        "Serviços desejados",
+        (
+            "Serviços para o aparelho já existente"
+            if possui == "Já tenho um e também quero comprar outro"
+            else "Serviços desejados"
+        ),
         servicos_ativos,
         key="cliente_servicos",
     )
@@ -5398,13 +5613,22 @@ def pagina_cliente():
             st.warning("Informe um telefone/WhatsApp.")
             return
 
-        if possui == "Não, quero comprar":
+        if situacao_tem_compra(possui):
             if modo_compra == "Escolher um aparelho" and equipamento is None:
                 st.warning("Escolha um aparelho para incluir no orçamento.")
                 return
 
             if modo_compra == "Comparar aparelhos" and not opcoes_equipamentos:
                 st.warning("Marque pelo menos um aparelho para comparar.")
+                return
+
+            if (
+                possui == "Já tenho um e também quero comprar outro"
+                and not servicos
+            ):
+                st.warning(
+                    "Selecione pelo menos um serviço para o aparelho que você já possui."
+                )
                 return
 
         elif not servicos:
@@ -5417,7 +5641,7 @@ def pagina_cliente():
         # VENDA DE UM APARELHO ESPECÍFICO
         # -------------------------------------------------
         if (
-            possui == "Não, quero comprar"
+            situacao_tem_compra(possui)
             and modo_compra == "Escolher um aparelho"
             and equipamento is not None
         ):
@@ -5425,7 +5649,9 @@ def pagina_cliente():
 
             itens.append(
                 montar_item(
-                    equipamento.get("descricao", "Ar-condicionado"),
+                    descricao_equipamento_com_instalacao(
+                        equipamento.get("descricao", "Ar-condicionado")
+                    ),
                     1,
                     "equipamento",
                     equipamento.get("preco", 0),
@@ -5433,19 +5659,39 @@ def pagina_cliente():
                 )
             )
 
+            # Em compra simples, serviços opcionais são adicionais e usam a
+            # capacidade do aparelho comprado. No cenário misto, os serviços
+            # pertencem ao aparelho que o cliente já possui.
+            cap_servicos = (
+                capacidade_existente
+                if possui == "Já tenho um e também quero comprar outro"
+                else cap_calculo
+            )
+            cap_servicos = (
+                cap_servicos
+                if cap_servicos in CAPACIDADES
+                else None
+            )
+
             for nome_servico in servicos:
                 dados = config["servicos"][nome_servico]
                 valor = float(
                     dados.get("precos", {}).get(
-                        cap_calculo,
+                        cap_servicos,
                         0,
                     )
                     or 0
+                ) if cap_servicos else 0.0
+
+                descricao_servico = (
+                    f"{nome_servico} • {cap_servicos}"
+                    if cap_servicos
+                    else f"{nome_servico} • capacidade a confirmar"
                 )
 
                 itens.append(
                     montar_item(
-                        f"{nome_servico} • {cap_calculo}",
+                        descricao_servico,
                         1,
                         "serviço",
                         valor,
@@ -5457,7 +5703,7 @@ def pagina_cliente():
         # COMPARAÇÃO ENTRE VÁRIOS APARELHOS
         # -------------------------------------------------
         elif (
-            possui == "Não, quero comprar"
+            situacao_tem_compra(possui)
             and modo_compra == "Comparar aparelhos"
             and opcoes_equipamentos
         ):
@@ -5466,24 +5712,31 @@ def pagina_cliente():
             for opcao in opcoes_equipamentos:
                 opcao_final = copy.deepcopy(opcao)
                 cap_opcao = opcao_final.get("capacidade")
+                opcao_final["descricao"] = descricao_equipamento_com_instalacao(
+                    opcao_final.get("descricao", "Ar-condicionado")
+                )
                 servicos_opcao = []
 
-                for nome_servico in servicos:
-                    dados_servico = config["servicos"][nome_servico]
-                    valor_servico = float(
-                        dados_servico.get("precos", {}).get(
-                            cap_opcao,
-                            0,
+                # Na compra simples, serviços extras (exceto instalação) podem
+                # acompanhar cada opção. No cenário misto, os serviços são do
+                # aparelho já existente e entram como itens comuns.
+                if possui == "Não, quero comprar":
+                    for nome_servico in servicos:
+                        dados_servico = config["servicos"][nome_servico]
+                        valor_servico = float(
+                            dados_servico.get("precos", {}).get(
+                                cap_opcao,
+                                0,
+                            )
+                            or 0
                         )
-                        or 0
-                    )
 
-                    servicos_opcao.append(
-                        {
-                            "descricao": f"{nome_servico} • {cap_opcao}",
-                            "valor": valor_servico,
-                        }
-                    )
+                        servicos_opcao.append(
+                            {
+                                "descricao": f"{nome_servico} • {cap_opcao}",
+                                "valor": valor_servico,
+                            }
+                        )
 
                 opcao_final["servicos"] = servicos_opcao
                 opcao_final["total_servicos"] = sum(
@@ -5494,6 +5747,36 @@ def pagina_cliente():
                 opcoes_com_servicos.append(opcao_final)
 
             opcoes_equipamentos = opcoes_com_servicos
+
+            if possui == "Já tenho um e também quero comprar outro":
+                cap_existente = (
+                    capacidade_existente
+                    if capacidade_existente in CAPACIDADES
+                    else None
+                )
+                for nome_servico in servicos:
+                    dados = config["servicos"][nome_servico]
+                    valor = float(
+                        dados.get("precos", {}).get(
+                            cap_existente,
+                            0,
+                        )
+                        or 0
+                    ) if cap_existente else 0.0
+                    descricao_servico = (
+                        f"{nome_servico} • {cap_existente}"
+                        if cap_existente
+                        else f"{nome_servico} • capacidade a confirmar"
+                    )
+                    itens.append(
+                        montar_item(
+                            descricao_servico,
+                            1,
+                            "serviço",
+                            valor,
+                            origem="servico",
+                        )
+                    )
 
         # -------------------------------------------------
         # CLIENTE JÁ POSSUI / ESTÁ AVALIANDO
@@ -5578,6 +5861,8 @@ def pagina_cliente():
             },
             "possui_aparelho": possui,
             "capacidade": capacidade,
+            "capacidade_aparelho_existente": capacidade_existente,
+            "instalacao_inclusa_equipamento": situacao_tem_compra(possui),
             "tipo_imovel": tipo_imovel,
             "andar": int(andar) if tipo_imovel == "Apartamento" else None,
             "area_ambiente": area,
@@ -5635,10 +5920,20 @@ def pagina_cliente():
         for item in ultimo.get("itens", []):
             qtd = float(item.get("quantidade", 0) or 0)
             vu = float(item.get("valor_unitario", 0) or 0)
+            desconto_item = limitar_percentual(
+                item.get("desconto_percentual", 0)
+            )
+            total_liquido = total_item(item)
+            texto_desconto = (
+                f" • desconto {desconto_item:g}%"
+                if desconto_item > 0
+                else ""
+            )
             st.write(
                 f"**{item.get('descricao','')}** — "
                 f"{qtd:g} {item.get('unidade','')} × "
-                f"{dinheiro(vu)} = **{dinheiro(qtd * vu)}**"
+                f"{dinheiro(vu)}{texto_desconto} = "
+                f"**{dinheiro(total_liquido)}**"
             )
 
         if opcoes_pdf:
@@ -5649,6 +5944,13 @@ def pagina_cliente():
 
             for opcao in opcoes_pdf:
                 preco_eq = float(opcao.get("preco", 0) or 0)
+                desconto_eq = limitar_percentual(
+                    opcao.get("desconto_percentual", 0)
+                )
+                preco_eq_liquido = aplicar_desconto(
+                    preco_eq,
+                    desconto_eq,
+                )
                 total_opcao = total_opcao_orcamento(
                     ultimo,
                     opcao,
@@ -5665,7 +5967,12 @@ def pagina_cliente():
                     (
                         '<div class="equipment-option">'
                         f'<div class="equipment-option-name">{opcao.get("descricao","Aparelho")}</div>'
-                        f'<div class="equipment-option-price">{dinheiro(preco_eq)}</div>'
+                        f'<div class="equipment-option-price">{dinheiro(preco_eq_liquido)}</div>'
+                        + (
+                            f'<div class="equipment-option-total">Desconto aplicado: {desconto_eq:g}%</div>'
+                            if desconto_eq > 0
+                            else ""
+                        )
                         + (
                             f'<div class="equipment-option-total">{detalhes_servicos}</div>'
                             if detalhes_servicos
