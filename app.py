@@ -27,6 +27,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 )
+from reportlab.graphics.shapes import Drawing, Path as RLPath, Rect, Circle, Line
 
 # =========================================================
 # PÁGINA
@@ -1744,6 +1745,43 @@ def situacao_tem_aparelho_existente(situacao):
         "Ainda estou avaliando",
     )
 
+def icone_pdf(tipo, cor):
+    """Ícones vetoriais simples e profissionais para o cabeçalho do orçamento."""
+    d = Drawing(12, 12)
+
+    if tipo == "casa":
+        p = RLPath()
+        p.moveTo(1.5, 5.5)
+        p.lineTo(6, 10.5)
+        p.lineTo(10.5, 5.5)
+        p.strokeColor = cor
+        p.strokeWidth = 1.4
+        p.fillColor = None
+        d.add(p)
+        d.add(Rect(3, 1.8, 6, 4.3, strokeColor=cor, fillColor=None, strokeWidth=1.2))
+        d.add(Rect(5.1, 1.8, 1.8, 2.8, strokeColor=cor, fillColor=None, strokeWidth=1.0))
+
+    elif tipo == "documento":
+        d.add(Rect(2.2, 1.5, 7.2, 9, strokeColor=cor, fillColor=None, strokeWidth=1.2))
+        d.add(Line(3.7, 7.8, 8.0, 7.8, strokeColor=cor, strokeWidth=1.0))
+        d.add(Line(3.7, 5.8, 8.0, 5.8, strokeColor=cor, strokeWidth=1.0))
+        d.add(Line(3.7, 3.8, 7.0, 3.8, strokeColor=cor, strokeWidth=1.0))
+
+    elif tipo == "local":
+        d.add(Circle(6, 7.2, 3.2, strokeColor=cor, fillColor=None, strokeWidth=1.2))
+        d.add(Circle(6, 7.2, 1.0, strokeColor=cor, fillColor=None, strokeWidth=1.0))
+        p = RLPath()
+        p.moveTo(3.8, 4.8)
+        p.lineTo(6, 1.2)
+        p.lineTo(8.2, 4.8)
+        p.strokeColor = cor
+        p.strokeWidth = 1.2
+        p.fillColor = None
+        d.add(p)
+
+    return d
+
+
 def gerar_pdf(orcamento):
     buffer = BytesIO()
 
@@ -1803,29 +1841,125 @@ def gerar_pdf(orcamento):
             logo_flow = ""
 
     empresa = config["empresa"]
-    empresa_linhas = [
-        f"<b>{empresa.get('nome','F Climatização')}</b>",
+
+    nome_empresa_style = ParagraphStyle(
+        "FNomeEmpresa",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=20,
+        leading=21,
+        textColor=azul,
+        spaceAfter=1,
+    )
+
+    slogan_style = ParagraphStyle(
+        "FSloganEmpresa",
+        parent=small,
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        leading=9.5,
+        textColor=colors.HexColor("#12345B"),
+    )
+
+    detalhe_empresa_style = ParagraphStyle(
+        "FDetalheEmpresa",
+        parent=small,
+        fontName="Helvetica",
+        fontSize=8.1,
+        leading=9.2,
+        textColor=colors.HexColor("#17355A"),
+    )
+
+    bloco_empresa = [
+        Paragraph(
+            empresa.get("nome", "F Climatização"),
+            nome_empresa_style,
+        )
     ]
 
     if empresa.get("slogan"):
-        empresa_linhas.append(f"<font size='8'>{empresa.get('slogan','')}</font>")
+        bloco_empresa.append(
+            Paragraph(
+                empresa.get("slogan", ""),
+                slogan_style,
+            )
+        )
+
+    detalhes_empresa = []
 
     if empresa.get("endereco"):
-        empresa_linhas.append(f"<font size='8'>{empresa.get('endereco','')}</font>")
+        detalhes_empresa.append(
+            [
+                icone_pdf("casa", azul2),
+                Paragraph(
+                    empresa.get("endereco", ""),
+                    detalhe_empresa_style,
+                ),
+            ]
+        )
 
     if empresa.get("cnpj"):
-        empresa_linhas.append(f"<font size='8'>CNPJ: {empresa.get('cnpj','')}</font>")
+        detalhes_empresa.append(
+            [
+                icone_pdf("documento", azul2),
+                Paragraph(
+                    f'CNPJ: {empresa.get("cnpj","")}',
+                    detalhe_empresa_style,
+                ),
+            ]
+        )
 
     if empresa.get("texto_atendimento"):
-        empresa_linhas.append(f"<font size='8'>{empresa.get('texto_atendimento','')}</font>")
+        detalhes_empresa.append(
+            [
+                icone_pdf("local", azul2),
+                Paragraph(
+                    empresa.get("texto_atendimento", ""),
+                    detalhe_empresa_style,
+                ),
+            ]
+        )
+
+    if detalhes_empresa:
+        detalhes_tbl = Table(
+            detalhes_empresa,
+            colWidths=[5 * mm, 92 * mm],
+            rowHeights=[5.2 * mm] * len(detalhes_empresa),
+        )
+        detalhes_tbl.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 1),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        bloco_empresa.append(Spacer(1, 1.2 * mm))
+        bloco_empresa.append(detalhes_tbl)
+
+    empresa_tbl = Table(
+        [[bloco_empresa]],
+        colWidths=[101 * mm],
+    )
+    empresa_tbl.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
 
     cab_dados = [
         [
             logo_flow,
-            Paragraph(
-                "<br/>".join(empresa_linhas),
-                title_style,
-            ),
+            empresa_tbl,
             Paragraph(
                 f"<b>ORÇAMENTO Nº {orcamento['numero']}</b><br/>"
                 f"<font size='8'>Data: {orcamento.get('data','')}</font>",
@@ -1833,17 +1967,25 @@ def gerar_pdf(orcamento):
             ),
         ]
     ]
-    cab = Table(cab_dados, colWidths=[28 * mm, 103 * mm, 43 * mm])
+
+    cab = Table(
+        cab_dados,
+        colWidths=[28 * mm, 103 * mm, 43 * mm],
+    )
     cab.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LINEBELOW", (0, 0), (-1, -1), 1.2, laranja),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ]
         )
     )
-    story += [cab, Spacer(1, 7 * mm)]
+
+    story += [cab, Spacer(1, 5 * mm)]
 
     cliente = orcamento.get("cliente", {})
     story.append(Paragraph("<b>Cliente</b>", title_style))
