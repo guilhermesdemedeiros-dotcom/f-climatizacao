@@ -1029,6 +1029,76 @@ def total_item_liquido_financeiro(item):
     return aplicar_desconto(qtd * valor, desconto)
 
 
+def estimar_resultado_pedido(orcamento, financeiro):
+    """
+    Estima receita, custo e lucro de um pedido ainda não faturado
+    usando os custos privados atuais e o valor líquido do pedido.
+    """
+    receita = 0.0
+    custo = 0.0
+
+    for item in orcamento.get("itens", []):
+        qtd = float(item.get("quantidade", 0) or 0)
+        venda = total_item_liquido_financeiro(item)
+        origem = item.get("origem", "manual")
+        custo_unit = 0.0
+
+        if origem == "material":
+            custo_unit = custo_material(
+                financeiro,
+                item.get("descricao", ""),
+            )
+
+        elif origem == "equipamento":
+            custo_unit = custo_equipamento(
+                financeiro,
+                orcamento.get("equipamento_id"),
+            )
+
+        receita += venda
+        custo += qtd * custo_unit
+
+    opcoes = orcamento.get("opcoes_equipamentos", [])
+
+    if len(opcoes) == 1:
+        opcao = opcoes[0]
+
+        receita += aplicar_desconto(
+            float(opcao.get("preco", 0) or 0),
+            opcao.get("desconto_percentual", 0),
+        )
+
+        custo += custo_equipamento(
+            financeiro,
+            opcao.get("id"),
+        )
+
+        for servico in opcao.get("servicos", []):
+            receita += aplicar_desconto(
+                float(servico.get("valor", 0) or 0),
+                servico.get("desconto_percentual", 0),
+            )
+
+    desconto_geral = limitar_percentual(
+        orcamento.get("desconto_percentual", 0)
+    )
+    receita_final = aplicar_desconto(
+        receita,
+        desconto_geral,
+    )
+
+    return {
+        "receita": receita_final,
+        "custo": custo,
+        "lucro": receita_final - custo,
+        "margem": (
+            ((receita_final - custo) / receita_final * 100)
+            if receita_final > 0
+            else 0.0
+        ),
+    }
+
+
 def snapshot_faturamento(orcamento, financeiro, pagamento=None):
     """
     Cria um retrato financeiro do orçamento no momento do faturamento.
@@ -1164,7 +1234,17 @@ def alterar_status_orcamento(
     orcamento["data_status"] = agora_status
     orcamento["atualizado_em"] = agora_status
 
+    if novo_status == "Pedido de venda" and pagamento is not None:
+        orcamento["pagamento_pedido"] = copy.deepcopy(pagamento)
+
     if novo_status == "Faturado / Concluído":
+        if pagamento is None:
+            pagamento = copy.deepcopy(
+                orcamento.get("pagamento_pedido", {})
+            )
+        orcamento["pagamento_faturamento"] = copy.deepcopy(
+            pagamento or {}
+        )
         financeiro.setdefault("movimentacoes", {})[
             numero
         ] = snapshot_faturamento(
@@ -2292,33 +2372,63 @@ def aba_orcamentos():
 
             pagamento_status = None
 
-            if (
-                novo_status == "Faturado / Concluído"
-                and status_atual != "Faturado / Concluído"
-            ):
-                st.markdown("#### Forma de pagamento")
+            precisa_pagamento = novo_status in (
+                "Pedido de venda",
+                "Faturado / Concluído",
+            )
+
+            if precisa_pagamento:
+                pagamento_salvo = {}
+
+                if novo_status == "Pedido de venda":
+                    pagamento_salvo = copy.deepcopy(
+                        o.get("pagamento_pedido", {})
+                    )
+                    st.markdown("#### Condição do pedido")
+
+                else:
+                    pagamento_salvo = copy.deepcopy(
+                        o.get("pagamento_faturamento")
+                        or o.get("pagamento_pedido")
+                        or {}
+                    )
+                    st.markdown("#### Forma de pagamento")
+
+                forma_salva = pagamento_salvo.get(
+                    "forma",
+                    FORMAS_PAGAMENTO[0],
+                )
+                if forma_salva not in FORMAS_PAGAMENTO:
+                    forma_salva = FORMAS_PAGAMENTO[0]
 
                 forma_pagamento = st.selectbox(
                     "Método de pagamento",
                     FORMAS_PAGAMENTO,
-                    key=f"adm_pagamento_forma_{numero}",
+                    index=FORMAS_PAGAMENTO.index(forma_salva),
+                    key=f"adm_pagamento_forma_{numero}_{novo_status}",
                 )
 
                 parcelas = 1
                 if pagamento_exige_parcelas(forma_pagamento):
+                    parcelas_salvas = int(
+                        pagamento_salvo.get("parcelas", 2) or 2
+                    )
+                    parcelas_salvas = max(2, min(60, parcelas_salvas))
+
                     parcelas = st.number_input(
                         "Número de parcelas",
                         min_value=2,
                         max_value=60,
-                        value=2,
+                        value=parcelas_salvas,
                         step=1,
-                        key=f"adm_pagamento_parcelas_{numero}",
+                        key=f"adm_pagamento_parcelas_{numero}_{novo_status}",
                     )
 
                 observacao_pagamento = st.text_input(
                     "Observação do pagamento",
+                    value=pagamento_salvo.get("observacao", ""),
                     placeholder="Opcional",
-                    key=f"adm_pagamento_obs_{numero}",
+                    key=f"adm_pagamento_obs_{numero}_{novo_status}",
                 )
 
                 pagamento_status = {
@@ -2327,12 +2437,36 @@ def aba_orcamentos():
                     "observacao": observacao_pagamento.strip(),
                 }
 
+                if status_atual == "Pedido de venda" and novo_status == "Pedido de venda":
+                    if st.button(
+                        "Salvar condição de pagamento do pedido",
+                        use_container_width=True,
+                        key=f"adm_salvar_pagamento_pedido_{numero}",
+                    ):
+                        try:
+                            o["pagamento_pedido"] = copy.deepcopy(
+                                pagamento_status
+                            )
+                            o["atualizado_em"] = datetime.now(
+                                FUSO_BRASILIA
+                            ).strftime("%d/%m/%Y %H:%M")
+                            salvar_orcamentos(orcamentos)
+                            st.success(
+                                "Condição de pagamento do pedido salva."
+                            )
+                            st.rerun()
+                        except Exception as e:
+                            st.error(
+                                f"Erro ao salvar condição de pagamento: {e}"
+                            )
+
             if novo_status != status_atual:
-                texto_botao = (
-                    "Faturar / concluir venda"
-                    if novo_status == "Faturado / Concluído"
-                    else f"Aplicar status: {novo_status}"
-                )
+                if novo_status == "Faturado / Concluído":
+                    texto_botao = "Faturar / concluir venda"
+                elif novo_status == "Pedido de venda":
+                    texto_botao = "Confirmar pedido de venda"
+                else:
+                    texto_botao = f"Aplicar status: {novo_status}"
 
                 if st.button(
                     texto_botao,
@@ -3700,10 +3834,53 @@ def pagina_central_faturamento():
 
     secao(
         "Pedidos de venda",
-        "Valores já confirmados, mas ainda não faturados.",
+        "Lançamentos futuros: receita, custo e lucro estimados dos pedidos ainda não concluídos.",
     )
 
+    receita_pedidos = 0.0
+    custo_pedidos = 0.0
+    lucro_pedidos = 0.0
+
+    for pedido in pedidos_filtrados:
+        estimativa_pedido = estimar_resultado_pedido(
+            pedido,
+            financeiro,
+        )
+        receita_pedidos += estimativa_pedido["receita"]
+        custo_pedidos += estimativa_pedido["custo"]
+        lucro_pedidos += estimativa_pedido["lucro"]
+
     if pedidos_filtrados:
+        margem_pedidos = (
+            lucro_pedidos / receita_pedidos * 100
+            if receita_pedidos > 0
+            else 0.0
+        )
+
+        st.markdown(
+            f"""
+            <div class="finance-grid">
+              <div class="finance-card">
+                <div class="finance-card-label">Receita futura</div>
+                <div class="finance-card-value blue">{dinheiro(receita_pedidos)}</div>
+              </div>
+              <div class="finance-card">
+                <div class="finance-card-label">Custo previsto</div>
+                <div class="finance-card-value orange">{dinheiro(custo_pedidos)}</div>
+              </div>
+              <div class="finance-card">
+                <div class="finance-card-label">Lucro previsto</div>
+                <div class="finance-card-value positive">{dinheiro(lucro_pedidos)}</div>
+              </div>
+              <div class="finance-card">
+                <div class="finance-card-label">Margem prevista</div>
+                <div class="finance-card-value">{margem_pedidos:.1f}%</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         for pedido in sorted(
             pedidos_filtrados,
             key=lambda x: str(x.get("numero", "")),
@@ -3718,6 +3895,40 @@ def pagina_central_faturamento():
             else:
                 valor_pedido = total_orcamento(pedido)
 
+            estimativa_pedido = estimar_resultado_pedido(
+                pedido,
+                financeiro,
+            )
+
+            pagamento_pedido = pedido.get(
+                "pagamento_pedido",
+                {},
+            )
+            forma_pedido = pagamento_pedido.get(
+                "forma",
+                "Pagamento não informado",
+            )
+            parcelas_pedido = int(
+                pagamento_pedido.get("parcelas", 1) or 1
+            )
+            if parcelas_pedido > 1:
+                forma_pedido = (
+                    f"{forma_pedido} • {parcelas_pedido}x"
+                )
+
+            observacao_pedido = pagamento_pedido.get(
+                "observacao",
+                "",
+            ).strip()
+            detalhe_pagamento = (
+                f"{forma_pedido}"
+                + (
+                    f" • {observacao_pedido}"
+                    if observacao_pedido
+                    else ""
+                )
+            )
+
             st.markdown(
                 f"""
                 <div class="finance-pay">
@@ -3726,7 +3937,11 @@ def pagina_central_faturamento():
                     {pedido.get("cliente",{}).get("nome","Cliente")}
                   </div>
                   <div class="finance-pay-meta">
-                    {dinheiro(valor_pedido)} • aguardando faturamento
+                    Receita prevista: {dinheiro(estimativa_pedido["receita"])}
+                    • Custo: {dinheiro(estimativa_pedido["custo"])}
+                    • Lucro: {dinheiro(estimativa_pedido["lucro"])}
+                    • Margem: {estimativa_pedido["margem"]:.1f}%
+                    • {detalhe_pagamento}
                   </div>
                 </div>
                 """,
