@@ -1870,55 +1870,331 @@ def aba_orcamentos():
                             )
 
             # ---------------------------------------------
-            # ADICIONAR ITEM MANUAL
+            # ADICIONAR ITEM
+            # Cadastrado ou novo, salvando no catálogo correto
             # ---------------------------------------------
             with st.expander("Adicionar item"):
-                novo_desc = st.text_input(
-                    "Descrição",
-                    key=f"adm_novo_desc_{numero}",
+                tipo_novo_item = st.radio(
+                    "Tipo de item",
+                    ["Material", "Serviço"],
+                    horizontal=True,
+                    key=f"adm_add_tipo_{numero}",
                 )
-                nc1, nc2 = st.columns(2)
 
-                with nc1:
-                    nova_qtd = st.number_input(
-                        "Quantidade",
-                        min_value=0.0,
-                        value=1.0,
-                        step=1.0,
-                        key=f"adm_nova_qtd_{numero}",
-                    )
+                origem_novo_item = st.radio(
+                    "Origem",
+                    ["Cadastrado", "Criar novo"],
+                    horizontal=True,
+                    key=f"adm_add_origem_{numero}",
+                )
 
-                with nc2:
-                    nova_un = st.selectbox(
-                        "Unidade",
-                        UNIDADES_ITEM,
-                        key=f"adm_nova_un_{numero}",
-                    )
+                item_para_adicionar = None
+                novo_catalogo = None
 
-                nc3, nc4 = st.columns(2)
+                # =================================================
+                # MATERIAL
+                # =================================================
+                if tipo_novo_item == "Material":
+                    if origem_novo_item == "Cadastrado":
+                        materiais_ativos = {
+                            nome_mat: dados_mat
+                            for nome_mat, dados_mat
+                            in config.get("materiais", {}).items()
+                            if dados_mat.get("ativo", True)
+                        }
 
-                with nc3:
-                    novo_valor = st.number_input(
-                        "Valor unitário",
-                        min_value=0.0,
-                        value=0.0,
-                        step=1.0,
-                        key=f"adm_novo_valor_{numero}",
-                    )
+                        if not materiais_ativos:
+                            st.info("Nenhum material ativo cadastrado.")
+                        else:
+                            material_nome = st.selectbox(
+                                "Material",
+                                list(materiais_ativos.keys()),
+                                key=f"adm_add_mat_nome_{numero}",
+                            )
 
-                with nc4:
-                    novo_desconto = st.number_input(
-                        "Desconto (%)",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=0.0,
-                        step=1.0,
-                        key=f"adm_novo_descpct_{numero}",
-                    )
+                            material_dados = materiais_ativos[material_nome]
+                            unidade_material = material_dados.get(
+                                "unidade",
+                                "unidade",
+                            )
+                            preco_material = float(
+                                material_dados.get("preco", 0) or 0
+                            )
+
+                            mc1, mc2 = st.columns(2)
+
+                            with mc1:
+                                material_qtd = st.number_input(
+                                    f"Quantidade ({unidade_material})",
+                                    min_value=0.0,
+                                    value=1.0,
+                                    step=(
+                                        0.5
+                                        if unidade_material == "metro"
+                                        else 1.0
+                                    ),
+                                    key=f"adm_add_mat_qtd_{numero}",
+                                )
+
+                            with mc2:
+                                material_desc = st.number_input(
+                                    "Desconto (%)",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=0.0,
+                                    step=1.0,
+                                    key=f"adm_add_mat_desc_{numero}",
+                                )
+
+                            st.caption(
+                                f"Preço cadastrado: {dinheiro(preco_material)} / "
+                                f"{unidade_material}"
+                            )
+
+                            if material_qtd > 0:
+                                item_para_adicionar = montar_item(
+                                    material_nome,
+                                    material_qtd,
+                                    unidade_material,
+                                    preco_material,
+                                    origem="material",
+                                    desconto_percentual=material_desc,
+                                )
+
+                    else:
+                        novo_mat_nome = st.text_input(
+                            "Nome do novo material",
+                            key=f"adm_novo_mat_nome_{numero}",
+                        ).strip()
+
+                        nm1, nm2 = st.columns(2)
+
+                        with nm1:
+                            novo_mat_un = st.selectbox(
+                                "Unidade",
+                                UNIDADES_ITEM,
+                                key=f"adm_novo_mat_un_{numero}",
+                            )
+
+                        with nm2:
+                            novo_mat_preco = st.number_input(
+                                "Preço cadastrado",
+                                min_value=0.0,
+                                value=0.0,
+                                step=1.0,
+                                key=f"adm_novo_mat_preco_{numero}",
+                            )
+
+                        nm3, nm4 = st.columns(2)
+
+                        with nm3:
+                            novo_mat_qtd = st.number_input(
+                                "Quantidade no orçamento",
+                                min_value=0.0,
+                                value=1.0,
+                                step=(
+                                    0.5
+                                    if novo_mat_un == "metro"
+                                    else 1.0
+                                ),
+                                key=f"adm_novo_mat_qtd_{numero}",
+                            )
+
+                        with nm4:
+                            novo_mat_desc = st.number_input(
+                                "Desconto (%)",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=0.0,
+                                step=1.0,
+                                key=f"adm_novo_mat_desc_{numero}",
+                            )
+
+                        if novo_mat_nome and novo_mat_qtd > 0:
+                            item_para_adicionar = montar_item(
+                                novo_mat_nome,
+                                novo_mat_qtd,
+                                novo_mat_un,
+                                novo_mat_preco,
+                                origem="material",
+                                desconto_percentual=novo_mat_desc,
+                            )
+
+                            novo_catalogo = {
+                                "tipo": "material",
+                                "nome": novo_mat_nome,
+                                "dados": {
+                                    "unidade": novo_mat_un,
+                                    "preco": float(novo_mat_preco),
+                                    "ativo": True,
+                                },
+                            }
+
+                # =================================================
+                # SERVIÇO
+                # =================================================
+                else:
+                    if origem_novo_item == "Cadastrado":
+                        servicos_ativos = {
+                            nome_serv: dados_serv
+                            for nome_serv, dados_serv
+                            in config.get("servicos", {}).items()
+                            if dados_serv.get("ativo", True)
+                        }
+
+                        if not servicos_ativos:
+                            st.info("Nenhum serviço ativo cadastrado.")
+                        else:
+                            servico_nome = st.selectbox(
+                                "Serviço",
+                                list(servicos_ativos.keys()),
+                                key=f"adm_add_serv_nome_{numero}",
+                            )
+
+                            capacidade_serv = st.selectbox(
+                                "Capacidade",
+                                CAPACIDADES,
+                                key=f"adm_add_serv_cap_{numero}",
+                            )
+
+                            preco_servico = float(
+                                servicos_ativos[servico_nome]
+                                .get("precos", {})
+                                .get(capacidade_serv, 0)
+                                or 0
+                            )
+
+                            sc1, sc2 = st.columns(2)
+
+                            with sc1:
+                                servico_qtd = st.number_input(
+                                    "Quantidade",
+                                    min_value=0.0,
+                                    value=1.0,
+                                    step=1.0,
+                                    key=f"adm_add_serv_qtd_{numero}",
+                                )
+
+                            with sc2:
+                                servico_desc = st.number_input(
+                                    "Desconto (%)",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=0.0,
+                                    step=1.0,
+                                    key=f"adm_add_serv_desc_{numero}",
+                                )
+
+                            st.caption(
+                                f"Preço cadastrado para {capacidade_serv}: "
+                                f"{dinheiro(preco_servico)}"
+                            )
+
+                            if servico_qtd > 0:
+                                item_para_adicionar = montar_item(
+                                    f"{servico_nome} • {capacidade_serv}",
+                                    servico_qtd,
+                                    "serviço",
+                                    preco_servico,
+                                    origem="servico",
+                                    desconto_percentual=servico_desc,
+                                )
+
+                    else:
+                        novo_serv_nome = st.text_input(
+                            "Nome do novo serviço",
+                            key=f"adm_novo_serv_nome_{numero}",
+                        ).strip()
+
+                        novo_serv_desc_texto = st.text_input(
+                            "Descrição curta",
+                            key=f"adm_novo_serv_descricao_{numero}",
+                        )
+
+                        st.caption("Defina o preço-base por capacidade.")
+
+                        novos_precos_serv = {}
+
+                        sp1, sp2 = st.columns(2)
+
+                        for cap_idx, cap in enumerate(CAPACIDADES):
+                            coluna = sp1 if cap_idx % 2 == 0 else sp2
+                            with coluna:
+                                novos_precos_serv[cap] = st.number_input(
+                                    cap,
+                                    min_value=0.0,
+                                    value=0.0,
+                                    step=10.0,
+                                    key=f"adm_novo_serv_preco_{numero}_{cap}",
+                                )
+
+                        capacidade_novo_serv = st.selectbox(
+                            "Capacidade usada neste orçamento",
+                            CAPACIDADES,
+                            key=f"adm_novo_serv_cap_{numero}",
+                        )
+
+                        ns1, ns2 = st.columns(2)
+
+                        with ns1:
+                            novo_serv_qtd = st.number_input(
+                                "Quantidade no orçamento",
+                                min_value=0.0,
+                                value=1.0,
+                                step=1.0,
+                                key=f"adm_novo_serv_qtd_{numero}",
+                            )
+
+                        with ns2:
+                            novo_serv_desconto = st.number_input(
+                                "Desconto (%)",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=0.0,
+                                step=1.0,
+                                key=f"adm_novo_serv_descpct_{numero}",
+                            )
+
+                        if novo_serv_nome and novo_serv_qtd > 0:
+                            preco_atual_serv = float(
+                                novos_precos_serv.get(
+                                    capacidade_novo_serv,
+                                    0,
+                                )
+                                or 0
+                            )
+
+                            item_para_adicionar = montar_item(
+                                f"{novo_serv_nome} • {capacidade_novo_serv}",
+                                novo_serv_qtd,
+                                "serviço",
+                                preco_atual_serv,
+                                origem="servico",
+                                desconto_percentual=novo_serv_desconto,
+                            )
+
+                            novo_catalogo = {
+                                "tipo": "servico",
+                                "nome": novo_serv_nome,
+                                "dados": {
+                                    "ativo": True,
+                                    "mostrar_cliente": True,
+                                    "descricao": novo_serv_desc_texto.strip(),
+                                    "precos": {
+                                        cap: float(valor)
+                                        for cap, valor
+                                        in novos_precos_serv.items()
+                                    },
+                                },
+                            }
 
                 adicionar_novo = st.checkbox(
-                    "Adicionar este item ao salvar",
-                    key=f"adm_add_novo_{numero}",
+                    (
+                        "Adicionar ao orçamento e salvar no catálogo"
+                        if origem_novo_item == "Criar novo"
+                        else "Adicionar este item ao orçamento"
+                    ),
+                    key=f"adm_add_confirmar_{numero}",
                 )
 
             preview = copy.deepcopy(o)
@@ -1926,17 +2202,8 @@ def aba_orcamentos():
             preview["opcoes_equipamentos"] = opcoes_editadas if opcoes else []
             preview["desconto_percentual"] = float(desconto_geral)
 
-            if adicionar_novo and novo_desc.strip():
-                preview["itens"].append(
-                    montar_item(
-                        novo_desc.strip(),
-                        nova_qtd,
-                        nova_un,
-                        novo_valor,
-                        origem="adm",
-                        desconto_percentual=novo_desconto,
-                    )
-                )
+            if adicionar_novo and item_para_adicionar:
+                preview["itens"].append(item_para_adicionar)
 
             if preview.get("opcoes_equipamentos"):
                 st.markdown("**Totais finais das opções**")
@@ -1963,17 +2230,23 @@ def aba_orcamentos():
                 ):
                     itens_finais = itens_editados[:]
 
-                    if adicionar_novo and novo_desc.strip():
-                        itens_finais.append(
-                            montar_item(
-                                novo_desc.strip(),
-                                nova_qtd,
-                                nova_un,
-                                novo_valor,
-                                origem="adm",
-                                desconto_percentual=novo_desconto,
-                            )
-                        )
+                    if adicionar_novo and item_para_adicionar:
+                        itens_finais.append(item_para_adicionar)
+
+                    # Se o item foi criado aqui, grava também no catálogo correto.
+                    if adicionar_novo and novo_catalogo:
+                        nome_catalogo = novo_catalogo["nome"]
+                        tipo_catalogo = novo_catalogo["tipo"]
+
+                        if tipo_catalogo == "material":
+                            config.setdefault("materiais", {})[
+                                nome_catalogo
+                            ] = novo_catalogo["dados"]
+
+                        elif tipo_catalogo == "servico":
+                            config.setdefault("servicos", {})[
+                                nome_catalogo
+                            ] = novo_catalogo["dados"]
 
                     o["itens"] = itens_finais
                     o["opcoes_equipamentos"] = (
@@ -1985,8 +2258,18 @@ def aba_orcamentos():
                     ).strftime("%d/%m/%Y %H:%M")
 
                     try:
+                        if adicionar_novo and novo_catalogo:
+                            salvar_config()
+
                         salvar_orcamentos(orcamentos)
-                        st.success("Orçamento atualizado.")
+
+                        if adicionar_novo and novo_catalogo:
+                            st.success(
+                                "Orçamento atualizado e novo item salvo no catálogo."
+                            )
+                        else:
+                            st.success("Orçamento atualizado.")
+
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar orçamento: {e}")
