@@ -11,7 +11,7 @@
     "cnpj": "57.484.042/0001-62"
   },
   "servicos": {
-    "Instalação": {
+    "Instalação ar condicionado": {
       "icone": "🛠️",
       "ativo": true,
       "mostrar_cliente": true,
@@ -56,6 +56,17 @@
         "12.000 BTUs": 280.0,
         "18.000 BTUs": 400.0,
         "24.000 BTUs": 480.0
+      }
+    },
+    "Instalação elétrica": {
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
       }
     }
   },
