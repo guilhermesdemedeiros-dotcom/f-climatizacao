@@ -26,7 +26,6 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 )
-from reportlab.graphics.shapes import Drawing, Path as RLPath, Rect, Circle, Line
 
 # =========================================================
 # PÁGINA
@@ -50,6 +49,7 @@ BRANCH = "main"
 
 CONFIG_FILE = "config.json"
 BUDGETS_FILE = "orcamentos.json"
+FINANCE_FILE = "financeiro.json"
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
@@ -806,6 +806,219 @@ def salvar_orcamentos(lista):
     )
 
 
+
+def carregar_financeiro():
+    try:
+        content, _ = github_get_file(DATA_REPO, FINANCE_FILE)
+        if content is None:
+            return {
+                "custos_materiais": {},
+                "custos_equipamentos": {},
+                "movimentacoes": {},
+            }
+
+        dados = json.loads(content)
+
+        if not isinstance(dados, dict):
+            dados = {}
+
+        dados.setdefault("custos_materiais", {})
+        dados.setdefault("custos_equipamentos", {})
+        dados.setdefault("movimentacoes", {})
+
+        return dados
+    except Exception as e:
+        st.error(f"Não foi possível carregar os dados financeiros: {e}")
+        return {
+            "custos_materiais": {},
+            "custos_equipamentos": {},
+            "movimentacoes": {},
+        }
+
+
+def salvar_financeiro(dados):
+    texto = json.dumps(dados, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(DATA_REPO, FINANCE_FILE)
+
+    github_put_file(
+        DATA_REPO,
+        FINANCE_FILE,
+        texto,
+        "Atualiza dados privados de faturamento e custos",
+        sha=sha,
+    )
+
+
+def custo_material(financeiro, nome):
+    return float(
+        financeiro.get("custos_materiais", {})
+        .get(nome, {})
+        .get("custo", 0)
+        or 0
+    )
+
+
+def custo_equipamento(financeiro, equipamento_id):
+    return float(
+        financeiro.get("custos_equipamentos", {})
+        .get(str(equipamento_id), {})
+        .get("custo", 0)
+        or 0
+    )
+
+
+def total_item_liquido_financeiro(item):
+    qtd = float(item.get("quantidade", 0) or 0)
+    valor = float(item.get("valor_unitario", 0) or 0)
+    desconto = limitar_percentual(item.get("desconto_percentual", 0))
+    return aplicar_desconto(qtd * valor, desconto)
+
+
+def snapshot_faturamento(orcamento, financeiro):
+    """
+    Cria um retrato financeiro do orçamento no momento do faturamento.
+    Serviços geram receita, porém não custo de estoque.
+    Materiais e equipamentos usam custo privado cadastrado.
+    """
+    linhas = []
+    receita = 0.0
+    custo = 0.0
+
+    for item in orcamento.get("itens", []):
+        qtd = float(item.get("quantidade", 0) or 0)
+        venda = total_item_liquido_financeiro(item)
+        origem = item.get("origem", "manual")
+        custo_unit = 0.0
+
+        if origem == "material":
+            custo_unit = custo_material(
+                financeiro,
+                item.get("descricao", ""),
+            )
+
+        elif origem == "equipamento":
+            custo_unit = custo_equipamento(
+                financeiro,
+                orcamento.get("equipamento_id"),
+            )
+
+        custo_total = qtd * custo_unit
+
+        linhas.append(
+            {
+                "descricao": item.get("descricao", ""),
+                "origem": origem,
+                "quantidade": qtd,
+                "unidade": item.get("unidade", ""),
+                "valor_venda": venda,
+                "custo_unitario": custo_unit,
+                "custo_total": custo_total,
+            }
+        )
+
+        receita += venda
+        custo += custo_total
+
+    # Orçamento comparativo só deve ser faturado após restar uma opção escolhida.
+    for opcao in orcamento.get("opcoes_equipamentos", []):
+        preco_eq = aplicar_desconto(
+            float(opcao.get("preco", 0) or 0),
+            opcao.get("desconto_percentual", 0),
+        )
+        custo_eq = custo_equipamento(
+            financeiro,
+            opcao.get("id"),
+        )
+
+        linhas.append(
+            {
+                "descricao": opcao.get("descricao", "Ar-condicionado"),
+                "origem": "equipamento",
+                "quantidade": 1.0,
+                "unidade": "equipamento",
+                "valor_venda": preco_eq,
+                "custo_unitario": custo_eq,
+                "custo_total": custo_eq,
+            }
+        )
+
+        receita += preco_eq
+        custo += custo_eq
+
+        for servico in opcao.get("servicos", []):
+            venda_servico = aplicar_desconto(
+                float(servico.get("valor", 0) or 0),
+                servico.get("desconto_percentual", 0),
+            )
+
+            linhas.append(
+                {
+                    "descricao": servico.get("descricao", "Serviço"),
+                    "origem": "servico",
+                    "quantidade": 1.0,
+                    "unidade": "serviço",
+                    "valor_venda": venda_servico,
+                    "custo_unitario": 0.0,
+                    "custo_total": 0.0,
+                }
+            )
+
+            receita += venda_servico
+
+    desconto_geral = limitar_percentual(
+        orcamento.get("desconto_percentual", 0)
+    )
+    receita_final = aplicar_desconto(
+        receita,
+        desconto_geral,
+    )
+
+    return {
+        "numero": str(orcamento.get("numero", "")).zfill(4),
+        "cliente": copy.deepcopy(orcamento.get("cliente", {})),
+        "data_faturamento": datetime.now(FUSO_BRASILIA).strftime(
+            "%d/%m/%Y %H:%M"
+        ),
+        "linhas": linhas,
+        "receita": receita_final,
+        "custo": custo,
+        "lucro": receita_final - custo,
+        "desconto_geral": desconto_geral,
+    }
+
+
+def alterar_status_orcamento(
+    orcamentos,
+    orcamento,
+    novo_status,
+    financeiro,
+):
+    numero = str(orcamento.get("numero", "")).zfill(4)
+    status_anterior = orcamento.get("status", "Orçamento")
+    orcamento["status"] = novo_status
+    orcamento["atualizado_em"] = datetime.now(
+        FUSO_BRASILIA
+    ).strftime("%d/%m/%Y %H:%M")
+
+    if novo_status == "Faturado / Concluído":
+        financeiro.setdefault("movimentacoes", {})[
+            numero
+        ] = snapshot_faturamento(
+            orcamento,
+            financeiro,
+        )
+
+    elif status_anterior == "Faturado / Concluído":
+        # Reversão: sai imediatamente da central de faturamento.
+        financeiro.setdefault("movimentacoes", {}).pop(
+            numero,
+            None,
+        )
+
+    salvar_orcamentos(orcamentos)
+    salvar_financeiro(financeiro)
+
+
 def proximo_numero(lista):
     maior = 0
     for o in lista:
@@ -1078,48 +1291,6 @@ def nome_equipamento(eq):
 # PDF
 # =========================================================
 
-def icone_pdf(tipo, cor):
-    """Ícones vetoriais simples para o cabeçalho do orçamento."""
-    d = Drawing(12, 12)
-
-    if tipo == "casa":
-        p = RLPath()
-        p.moveTo(1.5, 5.5)
-        p.lineTo(6, 10.5)
-        p.lineTo(10.5, 5.5)
-        p.strokeColor = cor
-        p.strokeWidth = 1.4
-        p.fillColor = None
-        d.add(p)
-        d.add(Rect(3, 1.8, 6, 4.3, strokeColor=cor, fillColor=None, strokeWidth=1.2))
-        d.add(Rect(5.1, 1.8, 1.8, 2.8, strokeColor=cor, fillColor=None, strokeWidth=1.0))
-
-    elif tipo == "documento":
-        d.add(Rect(2.2, 1.5, 7.2, 9, strokeColor=cor, fillColor=None, strokeWidth=1.2))
-        d.add(Line(3.7, 7.8, 8.0, 7.8, strokeColor=cor, strokeWidth=1.0))
-        d.add(Line(3.7, 5.8, 8.0, 5.8, strokeColor=cor, strokeWidth=1.0))
-        d.add(Line(3.7, 3.8, 7.0, 3.8, strokeColor=cor, strokeWidth=1.0))
-
-    elif tipo == "local":
-        d.add(Circle(6, 7.2, 3.2, strokeColor=cor, fillColor=None, strokeWidth=1.2))
-        d.add(Circle(6, 7.2, 1.0, strokeColor=cor, fillColor=None, strokeWidth=1.0))
-        p = RLPath()
-        p.moveTo(3.8, 4.8)
-        p.lineTo(6, 1.2)
-        p.lineTo(8.2, 4.8)
-        p.strokeColor = cor
-        p.strokeWidth = 1.2
-        p.fillColor = None
-        d.add(p)
-
-    elif tipo == "contato":
-        d.add(Circle(6, 6, 4.2, strokeColor=cor, fillColor=None, strokeWidth=1.2))
-        d.add(Line(4.0, 6.1, 5.2, 4.9, strokeColor=cor, strokeWidth=1.2))
-        d.add(Line(5.2, 4.9, 8.2, 8.0, strokeColor=cor, strokeWidth=1.2))
-
-    return d
-
-
 def gerar_pdf(orcamento):
     buffer = BytesIO()
 
@@ -1179,125 +1350,29 @@ def gerar_pdf(orcamento):
             logo_flow = ""
 
     empresa = config["empresa"]
-
-    nome_empresa_style = ParagraphStyle(
-        "FNomeEmpresa",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=20,
-        leading=21,
-        textColor=azul,
-        spaceAfter=1,
-    )
-
-    slogan_style = ParagraphStyle(
-        "FSloganEmpresa",
-        parent=small,
-        fontName="Helvetica-Bold",
-        fontSize=8.5,
-        leading=9.5,
-        textColor=colors.HexColor("#12345B"),
-    )
-
-    detalhe_empresa_style = ParagraphStyle(
-        "FDetalheEmpresa",
-        parent=small,
-        fontName="Helvetica",
-        fontSize=8.1,
-        leading=9.2,
-        textColor=colors.HexColor("#17355A"),
-    )
-
-    bloco_empresa = [
-        Paragraph(
-            empresa.get("nome", "F Climatização"),
-            nome_empresa_style,
-        )
+    empresa_linhas = [
+        f"<b>{empresa.get('nome','F Climatização')}</b>",
     ]
 
     if empresa.get("slogan"):
-        bloco_empresa.append(
-            Paragraph(
-                empresa.get("slogan", ""),
-                slogan_style,
-            )
-        )
-
-    detalhes_empresa = []
+        empresa_linhas.append(f"<font size='8'>{empresa.get('slogan','')}</font>")
 
     if empresa.get("endereco"):
-        detalhes_empresa.append(
-            [
-                icone_pdf("casa", azul2),
-                Paragraph(
-                    empresa.get("endereco", ""),
-                    detalhe_empresa_style,
-                ),
-            ]
-        )
+        empresa_linhas.append(f"<font size='8'>{empresa.get('endereco','')}</font>")
 
     if empresa.get("cnpj"):
-        detalhes_empresa.append(
-            [
-                icone_pdf("documento", azul2),
-                Paragraph(
-                    f'CNPJ: {empresa.get("cnpj","")}',
-                    detalhe_empresa_style,
-                ),
-            ]
-        )
+        empresa_linhas.append(f"<font size='8'>CNPJ: {empresa.get('cnpj','')}</font>")
 
     if empresa.get("texto_atendimento"):
-        detalhes_empresa.append(
-            [
-                icone_pdf("local", azul2),
-                Paragraph(
-                    empresa.get("texto_atendimento", ""),
-                    detalhe_empresa_style,
-                ),
-            ]
-        )
-
-    if detalhes_empresa:
-        detalhes_tbl = Table(
-            detalhes_empresa,
-            colWidths=[5 * mm, 92 * mm],
-            rowHeights=[5.2 * mm] * len(detalhes_empresa),
-        )
-        detalhes_tbl.setStyle(
-            TableStyle(
-                [
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]
-            )
-        )
-        bloco_empresa.append(Spacer(1, 1.2 * mm))
-        bloco_empresa.append(detalhes_tbl)
-
-    empresa_tbl = Table(
-        [[bloco_empresa]],
-        colWidths=[101 * mm],
-    )
-    empresa_tbl.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
+        empresa_linhas.append(f"<font size='8'>{empresa.get('texto_atendimento','')}</font>")
 
     cab_dados = [
         [
             logo_flow,
-            empresa_tbl,
+            Paragraph(
+                "<br/>".join(empresa_linhas),
+                title_style,
+            ),
             Paragraph(
                 f"<b>ORÇAMENTO Nº {orcamento['numero']}</b><br/>"
                 f"<font size='8'>Data: {orcamento.get('data','')}</font>",
@@ -1305,25 +1380,17 @@ def gerar_pdf(orcamento):
             ),
         ]
     ]
-
-    cab = Table(
-        cab_dados,
-        colWidths=[28 * mm, 103 * mm, 43 * mm],
-    )
+    cab = Table(cab_dados, colWidths=[28 * mm, 103 * mm, 43 * mm])
     cab.setStyle(
         TableStyle(
             [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LINEBELOW", (0, 0), (-1, -1), 1.2, laranja),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
             ]
         )
     )
-
-    story += [cab, Spacer(1, 5 * mm)]
+    story += [cab, Spacer(1, 7 * mm)]
 
     cliente = orcamento.get("cliente", {})
     story.append(Paragraph("<b>Cliente</b>", title_style))
@@ -1803,6 +1870,43 @@ def aba_orcamentos():
                 f"{o.get('cliente',{}).get('telefone','')} • "
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
+
+            financeiro = carregar_financeiro()
+
+            status_opcoes = [
+                "Orçamento",
+                "Pedido de venda",
+                "Faturado / Concluído",
+            ]
+            status_atual = o.get("status", "Orçamento")
+            if status_atual not in status_opcoes:
+                status_atual = "Orçamento"
+
+            novo_status = st.selectbox(
+                "Status",
+                status_opcoes,
+                index=status_opcoes.index(status_atual),
+                key=f"adm_status_{numero}",
+            )
+
+            if novo_status != status_atual:
+                if st.button(
+                    f"Aplicar status: {novo_status}",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"adm_aplicar_status_{numero}",
+                ):
+                    try:
+                        alterar_status_orcamento(
+                            orcamentos,
+                            o,
+                            novo_status,
+                            financeiro,
+                        )
+                        st.success("Status atualizado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao alterar status: {e}")
 
             # ---------------------------------------------
             # DESCONTO GERAL
@@ -2593,6 +2697,9 @@ def aba_materiais():
         "Itens inativos deixam de aparecer nas opções de inclusão em novos orçamentos."
     )
 
+    financeiro = carregar_financeiro()
+    custos_privados = financeiro.setdefault("custos_materiais", {})
+
     reconstruidos = {}
 
     for idx, (nome, dados) in enumerate(list(config["materiais"].items())):
@@ -2628,7 +2735,42 @@ def aba_materiais():
                 key=f"mat_val_{idx}_{nome}",
             )
 
+            custo_atual = float(
+                custos_privados.get(nome, {}).get("custo", 0) or 0
+            )
+            custo_novo = st.number_input(
+                "Custo de aquisição (privado)",
+                min_value=0.0,
+                value=custo_atual,
+                step=1.0,
+                key=f"mat_custo_{idx}_{nome}",
+            )
+
+            margem_sugerida = st.number_input(
+                "Calcular venda por acréscimo (%)",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key=f"mat_margem_{idx}_{nome}",
+            )
+
+            if custo_novo > 0 and margem_sugerida > 0:
+                preco_sugerido = custo_novo * (
+                    1 + margem_sugerida / 100.0
+                )
+                st.caption(
+                    f"Venda sugerida: {dinheiro(preco_sugerido)}"
+                )
+
             chave_final = novo_nome or nome
+
+            # Mantém o custo privado associado ao nome final.
+            if nome != chave_final:
+                custos_privados.pop(nome, None)
+
+            custos_privados[chave_final] = {
+                "custo": float(custo_novo),
+            }
 
             # Evita sobrescrever silenciosamente outro material com o mesmo nome.
             if chave_final in reconstruidos and chave_final != nome:
@@ -2678,10 +2820,27 @@ def aba_materiais():
 
                 try:
                     salvar_config()
+                    financeiro.setdefault("custos_materiais", {})[
+                        nome_limpo
+                    ] = {
+                        "custo": 0.0,
+                    }
+                    salvar_financeiro(financeiro)
                     st.success("Material criado e salvo.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar material: {e}")
+
+    if st.button(
+        "Salvar custos privados dos materiais",
+        use_container_width=True,
+        key="salvar_custos_materiais",
+    ):
+        try:
+            salvar_financeiro(financeiro)
+            st.success("Custos privados dos materiais salvos.")
+        except Exception as e:
+            st.error(f"Erro ao salvar custos: {e}")
 
 
 # =========================================================
@@ -2693,6 +2852,9 @@ def aba_aparelhos():
         "Aparelhos",
         "Cadastre marca, capacidade, tipo e preço. A descrição é criada automaticamente.",
     )
+
+    financeiro = carregar_financeiro()
+    custos_privados = financeiro.setdefault("custos_equipamentos", {})
 
     remover = []
 
@@ -2739,6 +2901,38 @@ def aba_aparelhos():
                 key=f"eq_preco_{eid}",
             )
 
+            custo_eq = st.number_input(
+                "Custo de aquisição (privado)",
+                min_value=0.0,
+                value=float(
+                    custos_privados.get(str(eid), {}).get(
+                        "custo",
+                        0,
+                    )
+                    or 0
+                ),
+                step=50.0,
+                key=f"eq_custo_{eid}",
+            )
+
+            margem_eq = st.number_input(
+                "Calcular venda por acréscimo (%)",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key=f"eq_margem_{eid}",
+            )
+
+            custos_privados[str(eid)] = {
+                "custo": float(custo_eq),
+            }
+
+            if custo_eq > 0 and margem_eq > 0:
+                st.caption(
+                    f"Venda sugerida: "
+                    f"{dinheiro(custo_eq * (1 + margem_eq / 100.0))}"
+                )
+
             st.caption(f"Descrição automática: {nome_equipamento(eq)}")
 
             if st.checkbox("Excluir este aparelho", key=f"eq_del_{eid}"):
@@ -2746,6 +2940,7 @@ def aba_aparelhos():
 
     for eid in remover:
         config["equipamentos"].pop(eid, None)
+        custos_privados.pop(str(eid), None)
 
     st.markdown("#### Criar novo aparelho")
 
@@ -2776,10 +2971,27 @@ def aba_aparelhos():
             }
             try:
                 salvar_config()
+                financeiro.setdefault("custos_equipamentos", {})[
+                    eid
+                ] = {
+                    "custo": 0.0,
+                }
+                salvar_financeiro(financeiro)
                 st.success("Aparelho criado e salvo.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
+
+    if st.button(
+        "Salvar custos privados dos aparelhos",
+        use_container_width=True,
+        key="salvar_custos_aparelhos",
+    ):
+        try:
+            salvar_financeiro(financeiro)
+            st.success("Custos privados dos aparelhos salvos.")
+        except Exception as e:
+            st.error(f"Erro ao salvar custos: {e}")
 
 
 # =========================================================
@@ -2840,6 +3052,82 @@ def aba_empresa():
 # ADMIN
 # =========================================================
 
+def aba_faturamento():
+    secao(
+        "Faturamento",
+        "Vendas concluídas, custos privados e resultado realizado.",
+    )
+
+    financeiro = carregar_financeiro()
+    movimentacoes = financeiro.get("movimentacoes", {})
+
+    if not movimentacoes:
+        st.info(
+            "Nenhuma venda faturada no momento. "
+            "Quando um orçamento for marcado como Faturado / Concluído, "
+            "ele aparecerá aqui automaticamente."
+        )
+        return
+
+    movimentos = list(movimentacoes.values())
+
+    receita_total = sum(
+        float(m.get("receita", 0) or 0)
+        for m in movimentos
+    )
+    custo_total = sum(
+        float(m.get("custo", 0) or 0)
+        for m in movimentos
+    )
+    lucro_total = receita_total - custo_total
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Faturado", dinheiro(receita_total))
+    with c2:
+        st.metric("Custos", dinheiro(custo_total))
+    with c3:
+        st.metric("Lucro", dinheiro(lucro_total))
+
+    st.caption(
+        f"{len(movimentos)} venda(s) concluída(s). "
+        "Reverter o status do orçamento remove a venda desta central."
+    )
+
+    for mov in sorted(
+        movimentos,
+        key=lambda m: str(m.get("numero", "")),
+        reverse=True,
+    ):
+        numero = mov.get("numero", "----")
+        cliente = mov.get("cliente", {}).get("nome", "Cliente")
+
+        with st.expander(
+            f"Venda {numero} • {cliente} • {dinheiro(mov.get('receita',0))}"
+        ):
+            st.write(
+                f"**Faturado em:** {mov.get('data_faturamento','')}"
+            )
+            st.write(
+                f"**Receita:** {dinheiro(mov.get('receita',0))}"
+            )
+            st.write(
+                f"**Custo:** {dinheiro(mov.get('custo',0))}"
+            )
+            st.write(
+                f"**Lucro:** {dinheiro(mov.get('lucro',0))}"
+            )
+
+            st.markdown("#### Itens")
+
+            for linha in mov.get("linhas", []):
+                st.write(
+                    f'**{linha.get("descricao","Item")}** — '
+                    f'venda {dinheiro(linha.get("valor_venda",0))} • '
+                    f'custo {dinheiro(linha.get("custo_total",0))}'
+                )
+
+
 def pagina_admin():
     cabecalho(admin=True)
 
@@ -2863,19 +3151,31 @@ def pagina_admin():
                 st.error("Senha incorreta.")
         return
 
-    tabs = st.tabs(["Orçamentos", "Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
+    tabs = st.tabs(
+        [
+            "Orçamentos",
+            "Faturamento",
+            "Serviços",
+            "Materiais",
+            "Aparelhos",
+            "Regras",
+            "Empresa",
+        ]
+    )
 
     with tabs[0]:
         aba_orcamentos()
     with tabs[1]:
-        aba_servicos()
+        aba_faturamento()
     with tabs[2]:
-        aba_materiais()
+        aba_servicos()
     with tabs[3]:
-        aba_aparelhos()
+        aba_materiais()
     with tabs[4]:
-        aba_regras()
+        aba_aparelhos()
     with tabs[5]:
+        aba_regras()
+    with tabs[6]:
         aba_empresa()
 
     st.divider()
