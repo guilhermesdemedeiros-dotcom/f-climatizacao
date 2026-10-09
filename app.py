@@ -1782,6 +1782,36 @@ def icone_pdf(tipo, cor):
     return d
 
 
+def rotulo_documento(orcamento):
+    status = orcamento.get("status", "Orçamento")
+
+    if status == "Pedido de venda":
+        return "PEDIDO DE VENDA"
+
+    if status == "Faturado / Concluído":
+        return "VENDA CONCLUÍDA"
+
+    return "ORÇAMENTO"
+
+
+def pagamento_documento(orcamento):
+    status = orcamento.get("status", "Orçamento")
+
+    if status == "Pedido de venda":
+        return copy.deepcopy(
+            orcamento.get("pagamento_pedido", {})
+        )
+
+    if status == "Faturado / Concluído":
+        return copy.deepcopy(
+            orcamento.get("pagamento_faturamento")
+            or orcamento.get("pagamento_pedido")
+            or {}
+        )
+
+    return {}
+
+
 def gerar_pdf(orcamento):
     buffer = BytesIO()
 
@@ -1961,7 +1991,7 @@ def gerar_pdf(orcamento):
             logo_flow,
             empresa_tbl,
             Paragraph(
-                f"<b>ORÇAMENTO Nº {orcamento['numero']}</b><br/>"
+                f"<b>{rotulo_documento(orcamento)} Nº {orcamento['numero']}</b><br/>"
                 f"<font size='8'>Data: {orcamento.get('data','')}</font>",
                 right,
             ),
@@ -2012,6 +2042,64 @@ def gerar_pdf(orcamento):
         )
     )
     story += [cliente_tbl, Spacer(1, 6 * mm)]
+
+    pagamento_pdf = pagamento_documento(orcamento)
+
+    if pagamento_pdf:
+        forma_pagamento_pdf = pagamento_pdf.get(
+            "forma",
+            "Não informado",
+        )
+        parcelas_pagamento_pdf = int(
+            pagamento_pdf.get("parcelas", 1) or 1
+        )
+        observacao_pagamento_pdf = str(
+            pagamento_pdf.get("observacao", "") or ""
+        ).strip()
+
+        linhas_pagamento = [
+            ["Forma de pagamento", forma_pagamento_pdf],
+        ]
+
+        if parcelas_pagamento_pdf > 1:
+            linhas_pagamento.append(
+                ["Parcelamento", f"{parcelas_pagamento_pdf}x"]
+            )
+
+        if observacao_pagamento_pdf:
+            linhas_pagamento.append(
+                ["Observação", observacao_pagamento_pdf]
+            )
+
+        story.append(
+            Paragraph(
+                "<b>Condições de pagamento</b>",
+                title_style,
+            )
+        )
+
+        pagamento_tbl = Table(
+            linhas_pagamento,
+            colWidths=[42 * mm, 132 * mm],
+        )
+        pagamento_tbl.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("TEXTCOLOR", (0, 0), (0, -1), azul),
+                    ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F6F8FB")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+
+        story += [
+            pagamento_tbl,
+            Spacer(1, 6 * mm),
+        ]
 
     itens_orcamento = orcamento.get("itens", [])
     opcoes_equipamentos_pdf = orcamento.get("opcoes_equipamentos", [])
@@ -2301,24 +2389,57 @@ def gerar_pdf(orcamento):
             )
         destaques.append([Paragraph(texto_adicional, normal)])
 
-    destaques.append(
-        [
-            Paragraph(
-                "<b>Orçamento estimado.</b> "
-                "Valores podem variar conforme materiais, disponibilidade e condições do serviço.",
-                normal,
-            )
-        ]
-    )
+    status_documento = orcamento.get("status", "Orçamento")
 
-    destaques.append(
-        [
-            Paragraph(
-                "<b>Confirme o valor atualizado com a F Climatização antes do fechamento.</b>",
-                normal,
-            )
-        ]
-    )
+    if status_documento == "Pedido de venda":
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>Pedido de venda confirmado.</b> "
+                    "Valores, itens e condições de pagamento estão registrados conforme este documento.",
+                    normal,
+                )
+            ]
+        )
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>A conclusão da venda será registrada após o faturamento/conclusão do serviço.</b>",
+                    normal,
+                )
+            ]
+        )
+
+    elif status_documento == "Faturado / Concluído":
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>Venda concluída / faturada.</b> "
+                    "Este documento apresenta os itens e as condições de pagamento registradas na venda.",
+                    normal,
+                )
+            ]
+        )
+
+    else:
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>Orçamento estimado.</b> "
+                    "Valores podem variar conforme materiais, disponibilidade e condições do serviço.",
+                    normal,
+                )
+            ]
+        )
+
+        destaques.append(
+            [
+                Paragraph(
+                    "<b>Confirme o valor atualizado com a F Climatização antes do fechamento.</b>",
+                    normal,
+                )
+            ]
+        )
 
     destaque_tbl = Table(destaques, colWidths=[174 * mm])
     destaque_tbl.setStyle(
