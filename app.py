@@ -1264,6 +1264,70 @@ def alterar_status_orcamento(
     salvar_financeiro(financeiro)
 
 
+def sincronizar_central_faturamento(orcamentos, financeiro):
+    """
+    Reconstrói a central financeira a partir da Gestão Comercial.
+    Apenas registros atualmente marcados como Faturado / Concluído
+    permanecem em movimentações. Registros antigos/excluídos são removidos.
+    """
+    movimentacoes_atuais = financeiro.get("movimentacoes", {})
+    novas_movimentacoes = {}
+
+    for orcamento in orcamentos:
+        if orcamento.get("status", "Orçamento") != "Faturado / Concluído":
+            continue
+
+        numero = str(orcamento.get("numero", "")).zfill(4)
+
+        pagamento = (
+            orcamento.get("pagamento_faturamento")
+            or orcamento.get("pagamento_pedido")
+            or movimentacoes_atuais.get(numero, {}).get("pagamento")
+            or {}
+        )
+
+        snapshot = snapshot_faturamento(
+            orcamento,
+            financeiro,
+            pagamento=pagamento,
+        )
+
+        # Mantém a data original de faturamento, quando já existia.
+        data_anterior = movimentacoes_atuais.get(numero, {}).get(
+            "data_faturamento"
+        )
+        if data_anterior:
+            snapshot["data_faturamento"] = data_anterior
+        else:
+            snapshot["data_faturamento"] = (
+                orcamento.get("data_status")
+                or orcamento.get("atualizado_em")
+                or snapshot.get("data_faturamento")
+            )
+
+        novas_movimentacoes[numero] = snapshot
+
+    removidos = len(
+        set(movimentacoes_atuais.keys())
+        - set(novas_movimentacoes.keys())
+    )
+
+    atualizados = len(novas_movimentacoes)
+
+    financeiro["movimentacoes"] = novas_movimentacoes
+    financeiro["ultima_sincronizacao"] = datetime.now(
+        FUSO_BRASILIA
+    ).strftime("%d/%m/%Y %H:%M")
+
+    salvar_financeiro(financeiro)
+
+    return {
+        "atualizados": atualizados,
+        "removidos": removidos,
+        "ultima_sincronizacao": financeiro["ultima_sincronizacao"],
+    }
+
+
 def carregar_meta_orcamentos():
     try:
         content, _ = github_get_file(DATA_REPO, BUDGET_META_FILE)
@@ -3665,6 +3729,37 @@ def pagina_central_faturamento():
         unsafe_allow_html=True,
     )
 
+    if st.button(
+        "ATUALIZAR DADOS DA CENTRAL",
+        type="primary",
+        use_container_width=True,
+        key="atualizar_central_faturamento",
+    ):
+        try:
+            with tela_carregamento(
+                "Sincronizando pedidos e vendas com a Gestão Comercial..."
+            ):
+                orcamentos_sync = carregar_orcamentos()
+                financeiro_sync = carregar_financeiro()
+                resultado_sync = sincronizar_central_faturamento(
+                    orcamentos_sync,
+                    financeiro_sync,
+                )
+
+            st.success(
+                "Central atualizada. "
+                f"{resultado_sync['atualizados']} venda(s) faturada(s) sincronizada(s)"
+                + (
+                    f" e {resultado_sync['removidos']} registro(s) antigo(s) removido(s)."
+                    if resultado_sync["removidos"] > 0
+                    else "."
+                )
+            )
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível atualizar a central: {e}")
+
+
     with tela_carregamento("Carregando dados financeiros..."):
         financeiro = carregar_financeiro()
         orcamentos = carregar_orcamentos()
@@ -3672,6 +3767,15 @@ def pagina_central_faturamento():
     movimentacoes = list(
         financeiro.get("movimentacoes", {}).values()
     )
+
+    ultima_sync = financeiro.get("ultima_sincronizacao")
+    if ultima_sync:
+        st.caption(f"Última atualização da central: {ultima_sync}")
+    else:
+        st.caption(
+            "A central ainda não foi sincronizada manualmente. "
+            "Use o botão Atualizar dados da central."
+        )
 
     anos_encontrados = {
         ano
@@ -4161,7 +4265,8 @@ def pagina_admin():
           <div class="card-title">Central de Faturamento</div>
           <div class="card-text">
             Consulte faturamento, custos, lucro, formas de pagamento
-            e desempenho por mês e ano.
+            e desempenho por mês e ano. Use a atualização da central
+            para sincronizar alterações feitas na Gestão Comercial.
           </div>
         </div>
         """,
