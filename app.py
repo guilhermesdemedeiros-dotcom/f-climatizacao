@@ -1219,14 +1219,25 @@ def gerar_pdf(orcamento):
         for item in itens_orcamento:
             qtd = float(item.get("quantidade", 0) or 0)
             vu = float(item.get("valor_unitario", 0) or 0)
-            total_item = qtd * vu
+            desconto_item = limitar_percentual(
+                item.get("desconto_percentual", 0)
+            )
+            total_item_liquido = total_item(item)
+
+            descricao_item = str(item.get("descricao", ""))
+            if desconto_item > 0:
+                descricao_item += (
+                    f"<br/><font size='7' color='#5F6B7A'>"
+                    f"Desconto: {desconto_item:g}%</font>"
+                )
+
             dados.append(
                 [
-                    Paragraph(str(item.get("descricao", "")), small),
+                    Paragraph(descricao_item, small),
                     f"{qtd:g}",
                     item.get("unidade", ""),
                     dinheiro(vu),
-                    dinheiro(total_item),
+                    dinheiro(total_item_liquido),
                 ]
             )
 
@@ -1252,9 +1263,9 @@ def gerar_pdf(orcamento):
         )
         story += [itens_tbl, Spacer(1, 5 * mm)]
 
-    total = sum(
-        float(i.get("quantidade", 0) or 0) * float(i.get("valor_unitario", 0) or 0)
-        for i in itens_orcamento
+    total = calcular_total(itens_orcamento)
+    desconto_geral_pdf = limitar_percentual(
+        orcamento.get("desconto_percentual", 0)
     )
 
     if opcoes_equipamentos_pdf:
@@ -1310,7 +1321,15 @@ def gerar_pdf(orcamento):
         )
         story.append(
             Paragraph(
-                "Orçamento comparativo. Cada alternativa apresenta seu próprio valor com os serviços correspondentes, sem somar os aparelhos entre si.",
+                (
+                    "Orçamento comparativo. Cada alternativa apresenta seu próprio valor "
+                    "com os serviços correspondentes, sem somar os aparelhos entre si."
+                    + (
+                        f" Desconto geral aplicado: {desconto_geral_pdf:g}%."
+                        if desconto_geral_pdf > 0
+                        else ""
+                    )
+                ),
                 small,
             )
         )
@@ -1320,18 +1339,35 @@ def gerar_pdf(orcamento):
 
         for opcao in opcoes_equipamentos_pdf:
             preco_eq = float(opcao.get("preco", 0) or 0)
-            total_servicos_opcao = float(
-                opcao.get("total_servicos", 0) or 0
+            desconto_eq = limitar_percentual(
+                opcao.get("desconto_percentual", 0)
             )
-            total_final_opcao = total + preco_eq + total_servicos_opcao
+            total_final_opcao = total_opcao_orcamento(
+                orcamento,
+                opcao,
+            )
 
             descricao_opcao = str(
                 opcao.get("descricao", "Ar-condicionado")
             )
 
+            if desconto_eq > 0:
+                descricao_opcao += (
+                    f"<br/><font size='7' color='#5F6B7A'>"
+                    f"Desconto no aparelho: {desconto_eq:g}%</font>"
+                )
+
             if opcao.get("servicos"):
                 linhas_servico = "<br/>".join(
-                    f'{s.get("descricao","")}: {dinheiro(s.get("valor",0))}'
+                    (
+                        f'{s.get("descricao","")}: '
+                        f'{dinheiro(aplicar_desconto(s.get("valor",0), s.get("desconto_percentual",0)))}'
+                        + (
+                            f' (desc. {limitar_percentual(s.get("desconto_percentual",0)):g}%)'
+                            if limitar_percentual(s.get("desconto_percentual",0)) > 0
+                            else ''
+                        )
+                    )
                     for s in opcao.get("servicos", [])
                 )
                 descricao_opcao += (
@@ -1369,11 +1405,41 @@ def gerar_pdf(orcamento):
         )
         story += [opcoes_tbl, Spacer(1, 6 * mm)]
     else:
-        total_tbl = Table(
-            [[
+        total_final_pdf = aplicar_desconto(
+            total,
+            desconto_geral_pdf,
+        )
+
+        linhas_total = []
+        if desconto_geral_pdf > 0:
+            linhas_total.append(
+                [
+                    Paragraph("Subtotal", normal),
+                    Paragraph(dinheiro(total), right),
+                ]
+            )
+            linhas_total.append(
+                [
+                    Paragraph(
+                        f"<b>Desconto geral ({desconto_geral_pdf:g}%)</b>",
+                        normal,
+                    ),
+                    Paragraph(
+                        f"<b>- {dinheiro(total - total_final_pdf)}</b>",
+                        right,
+                    ),
+                ]
+            )
+
+        linhas_total.append(
+            [
                 Paragraph("<b>TOTAL ESTIMADO</b>", normal),
-                Paragraph(f"<b>{dinheiro(total)}</b>", right),
-            ]],
+                Paragraph(f"<b>{dinheiro(total_final_pdf)}</b>", right),
+            ]
+        )
+
+        total_tbl = Table(
+            linhas_total,
             colWidths=[120 * mm, 54 * mm],
         )
         total_tbl.setStyle(
@@ -1454,20 +1520,81 @@ def gerar_pdf(orcamento):
 # ORÇAMENTO
 # =========================================================
 
-def calcular_total(itens):
-    return sum(
-        float(i.get("quantidade", 0) or 0) * float(i.get("valor_unitario", 0) or 0)
-        for i in itens
+def limitar_percentual(valor):
+    try:
+        return max(0.0, min(100.0, float(valor or 0)))
+    except Exception:
+        return 0.0
+
+
+def aplicar_desconto(valor, percentual):
+    valor = float(valor or 0)
+    percentual = limitar_percentual(percentual)
+    return valor * (1 - percentual / 100.0)
+
+
+def total_item(item):
+    bruto = (
+        float(item.get("quantidade", 0) or 0)
+        * float(item.get("valor_unitario", 0) or 0)
+    )
+    return aplicar_desconto(
+        bruto,
+        item.get("desconto_percentual", 0),
     )
 
 
-def montar_item(descricao, quantidade, unidade, valor_unitario, origem="manual"):
+def calcular_total(itens):
+    return sum(total_item(i) for i in itens)
+
+
+def total_servicos_opcao(opcao):
+    return sum(
+        aplicar_desconto(
+            float(servico.get("valor", 0) or 0),
+            servico.get("desconto_percentual", 0),
+        )
+        for servico in opcao.get("servicos", [])
+    )
+
+
+def total_opcao_orcamento(orcamento, opcao):
+    comuns = calcular_total(orcamento.get("itens", []))
+    equipamento = aplicar_desconto(
+        float(opcao.get("preco", 0) or 0),
+        opcao.get("desconto_percentual", 0),
+    )
+    servicos = total_servicos_opcao(opcao)
+    subtotal = comuns + equipamento + servicos
+    return aplicar_desconto(
+        subtotal,
+        orcamento.get("desconto_percentual", 0),
+    )
+
+
+def total_orcamento(orcamento):
+    subtotal = calcular_total(orcamento.get("itens", []))
+    return aplicar_desconto(
+        subtotal,
+        orcamento.get("desconto_percentual", 0),
+    )
+
+
+def montar_item(
+    descricao,
+    quantidade,
+    unidade,
+    valor_unitario,
+    origem="manual",
+    desconto_percentual=0,
+):
     return {
         "id": uuid.uuid4().hex[:10],
         "descricao": descricao,
         "quantidade": float(quantidade),
         "unidade": unidade,
         "valor_unitario": float(valor_unitario),
+        "desconto_percentual": limitar_percentual(desconto_percentual),
         "origem": origem,
     }
 
@@ -1477,7 +1604,10 @@ def montar_item(descricao, quantidade, unidade, valor_unitario, origem="manual")
 # =========================================================
 
 def aba_orcamentos():
-    secao("Orçamentos", "Abra, ajuste itens e compartilhe novamente em PDF.")
+    secao(
+        "Orçamentos",
+        "Edite preços, itens e descontos diretamente no orçamento.",
+    )
 
     orcamentos = carregar_orcamentos()
 
@@ -1487,7 +1617,7 @@ def aba_orcamentos():
 
     busca = st.text_input(
         "Buscar por número, cliente ou telefone",
-        key="buscar_orcamentos",
+        key="adm_buscar_orcamentos",
     ).strip().lower()
 
     filtrados = []
@@ -1509,56 +1639,46 @@ def aba_orcamentos():
             filtrados.append(o)
 
     for o in filtrados:
-        numero = o.get("numero", "----")
+        numero = str(o.get("numero", "----")).zfill(4)
         nome = o.get("cliente", {}).get("nome", "Cliente")
-        total = calcular_total(o.get("itens", []))
-        qtd_opcoes = len(o.get("opcoes_equipamentos", []))
+        opcoes = o.get("opcoes_equipamentos", [])
 
-        rotulo_total = (
-            f"{qtd_opcoes} opção(ões) de aparelho"
-            if qtd_opcoes
-            else dinheiro(total)
-        )
+        if opcoes:
+            rotulo_total = f"{len(opcoes)} opção(ões)"
+        else:
+            rotulo_total = dinheiro(total_orcamento(o))
 
         with st.expander(
             f"Orçamento {numero} • {nome} • {rotulo_total}"
         ):
-            st.markdown(
-                f'<span class="budget-number">#{numero}</span>',
-                unsafe_allow_html=True,
-            )
-
             st.caption(
                 f"{o.get('data','')} • "
                 f"{o.get('cliente',{}).get('telefone','')} • "
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
 
-            if o.get("opcoes_equipamentos"):
-                st.markdown("#### Opções de aparelho")
-                st.caption("Alternativas de compra — não são somadas entre si.")
-                for opcao in o.get("opcoes_equipamentos", []):
-                    preco_eq = float(opcao.get("preco", 0) or 0)
-                    total_servicos_opcao = float(
-                        opcao.get("total_servicos", 0) or 0
-                    )
-                    total_opcao = (
-                        total
-                        + preco_eq
-                        + total_servicos_opcao
-                    )
-                    st.write(
-                        f"**{opcao.get('descricao','Aparelho')}** — "
-                        f"{dinheiro(preco_eq)} "
-                        f"• total desta opção: **{dinheiro(total_opcao)}**"
-                    )
+            # ---------------------------------------------
+            # DESCONTO GERAL
+            # ---------------------------------------------
+            desconto_geral = st.number_input(
+                "Desconto no orçamento (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(o.get("desconto_percentual", 0) or 0),
+                step=1.0,
+                key=f"adm_desc_geral_{numero}",
+            )
+            o["desconto_percentual"] = float(desconto_geral)
 
-            st.markdown("#### Itens atuais")
+            # ---------------------------------------------
+            # ITENS COMUNS / ORÇAMENTO SIMPLES
+            # ---------------------------------------------
+            st.markdown("#### Itens")
 
             itens_editados = []
 
             for idx, item in enumerate(o.get("itens", [])):
-                iid = item.get("id") or f"item{idx}"
+                iid = item.get("id") or f"item_{idx}"
 
                 with st.expander(
                     item.get("descricao", f"Item {idx + 1}")
@@ -1566,7 +1686,7 @@ def aba_orcamentos():
                     desc = st.text_input(
                         "Descrição",
                         value=item.get("descricao", ""),
-                        key=f"orc_{numero}_{iid}_desc",
+                        key=f"adm_item_desc_{numero}_{iid}",
                     )
 
                     c1, c2 = st.columns(2)
@@ -1576,50 +1696,52 @@ def aba_orcamentos():
                             "Quantidade",
                             min_value=0.0,
                             value=float(item.get("quantidade", 1) or 0),
-                            step=(
-                                0.5
-                                if item.get("unidade") == "metro"
-                                else 1.0
-                            ),
-                            key=f"orc_{numero}_{iid}_qtd",
+                            step=0.5 if item.get("unidade") == "metro" else 1.0,
+                            key=f"adm_item_qtd_{numero}_{iid}",
                         )
 
                     with c2:
-                        unidade_atual = item.get(
-                            "unidade",
-                            "unidade",
-                        )
-
+                        unidade_atual = item.get("unidade", "unidade")
                         if unidade_atual not in UNIDADES_ITEM:
                             unidade_atual = "unidade"
 
                         unidade = st.selectbox(
                             "Unidade",
                             UNIDADES_ITEM,
-                            index=UNIDADES_ITEM.index(
-                                unidade_atual
-                            ),
-                            key=f"orc_{numero}_{iid}_un",
+                            index=UNIDADES_ITEM.index(unidade_atual),
+                            key=f"adm_item_un_{numero}_{iid}",
                         )
 
-                    vu = st.number_input(
-                        "Valor unitário",
-                        min_value=0.0,
-                        value=float(
-                            item.get("valor_unitario", 0) or 0
-                        ),
-                        step=1.0,
-                        key=f"orc_{numero}_{iid}_vu",
-                    )
+                    c3, c4 = st.columns(2)
 
-                    st.caption(
-                        f"Total: {dinheiro(qtd * vu)}"
+                    with c3:
+                        valor_unitario = st.number_input(
+                            "Valor unitário",
+                            min_value=0.0,
+                            value=float(item.get("valor_unitario", 0) or 0),
+                            step=1.0,
+                            key=f"adm_item_valor_{numero}_{iid}",
+                        )
+
+                    with c4:
+                        desconto_item = st.number_input(
+                            "Desconto (%)",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=float(item.get("desconto_percentual", 0) or 0),
+                            step=1.0,
+                            key=f"adm_item_descpct_{numero}_{iid}",
+                        )
+
+                    preview = aplicar_desconto(
+                        float(qtd) * float(valor_unitario),
+                        desconto_item,
                     )
+                    st.caption(f"Total do item: {dinheiro(preview)}")
 
                     remover = st.checkbox(
-                        "Remover do orçamento",
-                        value=False,
-                        key=f"orc_{numero}_{iid}_del",
+                        "Remover item",
+                        key=f"adm_item_del_{numero}_{iid}",
                     )
 
                     if not remover:
@@ -1629,250 +1751,207 @@ def aba_orcamentos():
                                 "descricao": desc,
                                 "quantidade": float(qtd),
                                 "unidade": unidade,
-                                "valor_unitario": float(vu),
-                                "origem": item.get(
-                                    "origem",
-                                    "manual",
-                                ),
+                                "valor_unitario": float(valor_unitario),
+                                "desconto_percentual": float(desconto_item),
+                                "origem": item.get("origem", "manual"),
                             }
                         )
 
-            # -------------------------------------------------
-            # NOVO ITEM
-            # -------------------------------------------------
+            # ---------------------------------------------
+            # OPÇÕES COMPARATIVAS
+            # ---------------------------------------------
+            opcoes_editadas = []
 
-            with st.expander("Adicionar item"):
-                tipo_item = st.radio(
-                    "Tipo",
-                    ["Material", "Serviço"],
-                    horizontal=True,
-                    key=f"novo_tipo_{numero}",
-                )
+            if opcoes:
+                st.markdown("#### Opções de aparelhos")
 
-                adicionar = False
-                item_novo = None
-                novo_material_catalogo = None
+                for idx, opcao in enumerate(opcoes):
+                    oid = str(opcao.get("id", f"opcao_{idx}"))
 
-                if tipo_item == "Material":
-                    origem_material = st.radio(
-                        "Material",
-                        ["Cadastrado", "Criar novo"],
-                        horizontal=True,
-                        key=f"origem_material_{numero}",
-                    )
-
-                    if origem_material == "Cadastrado":
-                        materiais_ativos = {
-                            nome_mat: dados_mat
-                            for nome_mat, dados_mat
-                            in config["materiais"].items()
-                            if dados_mat.get("ativo", True)
-                        }
-
-                        if not materiais_ativos:
-                            st.info(
-                                "Nenhum material ativo no catálogo."
-                            )
-                        else:
-                            nomes = list(
-                                materiais_ativos.keys()
-                            )
-
-                            escolhido = st.selectbox(
-                                "Escolha o material",
-                                nomes,
-                                key=f"mat_existente_{numero}",
-                            )
-
-                            dados_mat = materiais_ativos[
-                                escolhido
-                            ]
-
-                            unidade_mat = dados_mat.get(
-                                "unidade",
-                                "unidade",
-                            )
-
-                            if unidade_mat not in UNIDADES_ITEM:
-                                unidade_mat = "unidade"
-
-                            c1, c2 = st.columns(2)
-
-                            with c1:
-                                qtd_mat = st.number_input(
-                                    "Quantidade",
-                                    min_value=0.0,
-                                    value=1.0,
-                                    step=(
-                                        0.5
-                                        if unidade_mat == "metro"
-                                        else 1.0
-                                    ),
-                                    key=(
-                                        f"mat_qtd_{numero}_"
-                                        f"{escolhido}"
-                                    ),
-                                )
-
-                            with c2:
-                                valor_mat = st.number_input(
-                                    "Valor unitário",
-                                    min_value=0.0,
-                                    value=float(
-                                        dados_mat.get(
-                                            "preco",
-                                            0,
-                                        )
-                                        or 0
-                                    ),
-                                    step=1.0,
-                                    key=(
-                                        f"mat_preco_{numero}_"
-                                        f"{escolhido}"
-                                    ),
-                                )
-
-                            st.caption(
-                                f"Unidade: {unidade_mat} • "
-                                f"Total: "
-                                f"{dinheiro(qtd_mat * valor_mat)}"
-                            )
-
-                            adicionar = st.checkbox(
-                                "Adicionar este material ao salvar",
-                                key=f"add_mat_exist_{numero}",
-                            )
-
-                            if adicionar:
-                                item_novo = montar_item(
-                                    escolhido,
-                                    qtd_mat,
-                                    unidade_mat,
-                                    valor_mat,
-                                    origem="material",
-                                )
-
-                    else:
-                        novo_nome_mat = st.text_input(
-                            "Nome do novo material",
-                            key=f"novo_mat_orc_nome_{numero}",
+                    with st.expander(
+                        opcao.get("descricao", f"Opção {idx + 1}")
+                    ):
+                        desc_opcao = st.text_input(
+                            "Descrição do aparelho",
+                            value=opcao.get("descricao", ""),
+                            key=f"adm_op_desc_{numero}_{oid}",
                         )
 
                         c1, c2 = st.columns(2)
-
                         with c1:
-                            nova_un_mat = st.selectbox(
-                                "Unidade",
-                                UNIDADES_ITEM,
-                                key=f"novo_mat_orc_un_{numero}",
+                            preco_opcao = st.number_input(
+                                "Preço do aparelho",
+                                min_value=0.0,
+                                value=float(opcao.get("preco", 0) or 0),
+                                step=10.0,
+                                key=f"adm_op_preco_{numero}_{oid}",
                             )
 
                         with c2:
-                            novo_preco_mat = st.number_input(
-                                "Preço unitário",
+                            desc_opcao_pct = st.number_input(
+                                "Desconto do aparelho (%)",
                                 min_value=0.0,
-                                value=0.0,
+                                max_value=100.0,
+                                value=float(opcao.get("desconto_percentual", 0) or 0),
                                 step=1.0,
-                                key=f"novo_mat_orc_preco_{numero}",
+                                key=f"adm_op_descpct_{numero}_{oid}",
                             )
 
-                        nova_qtd_mat = st.number_input(
-                            "Quantidade",
-                            min_value=0.0,
-                            value=1.0,
-                            step=(
-                                0.5
-                                if nova_un_mat == "metro"
-                                else 1.0
-                            ),
-                            key=f"novo_mat_orc_qtd_{numero}",
-                        )
+                        servicos_editados = []
 
-                        adicionar = st.checkbox(
-                            "Criar material e adicionar ao orçamento",
-                            key=f"add_novo_mat_{numero}",
-                        )
+                        if opcao.get("servicos"):
+                            st.caption("Serviços desta opção")
 
-                        if adicionar and novo_nome_mat.strip():
-                            nome_limpo = novo_nome_mat.strip()
+                        for sidx, servico in enumerate(opcao.get("servicos", [])):
+                            sdesc = servico.get("descricao", f"Serviço {sidx + 1}")
+                            sc1, sc2 = st.columns(2)
 
-                            item_novo = montar_item(
-                                nome_limpo,
-                                nova_qtd_mat,
-                                nova_un_mat,
-                                novo_preco_mat,
-                                origem="material",
+                            with sc1:
+                                sval = st.number_input(
+                                    sdesc,
+                                    min_value=0.0,
+                                    value=float(servico.get("valor", 0) or 0),
+                                    step=1.0,
+                                    key=f"adm_op_serv_val_{numero}_{oid}_{sidx}",
+                                )
+
+                            with sc2:
+                                sdesconto = st.number_input(
+                                    f"Desconto (%) — {sdesc}",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=float(servico.get("desconto_percentual", 0) or 0),
+                                    step=1.0,
+                                    key=f"adm_op_serv_desc_{numero}_{oid}_{sidx}",
+                                )
+
+                            remover_serv = st.checkbox(
+                                f"Remover {sdesc}",
+                                key=f"adm_op_serv_del_{numero}_{oid}_{sidx}",
                             )
 
-                            novo_material_catalogo = {
-                                "nome": nome_limpo,
-                                "dados": {
-                                    "unidade": nova_un_mat,
-                                    "preco": float(
-                                        novo_preco_mat
-                                    ),
-                                    "ativo": True,
-                                },
-                            }
+                            if not remover_serv:
+                                servicos_editados.append(
+                                    {
+                                        "descricao": sdesc,
+                                        "valor": float(sval),
+                                        "desconto_percentual": float(sdesconto),
+                                    }
+                                )
 
-                else:
-                    desc_serv = st.text_input(
-                        "Descrição do serviço",
-                        key=f"novo_serv_desc_{numero}",
+                        remover_opcao = st.checkbox(
+                            "Remover esta opção de aparelho",
+                            key=f"adm_op_del_{numero}_{oid}",
+                        )
+
+                        if not remover_opcao:
+                            nova_opcao = copy.deepcopy(opcao)
+                            nova_opcao["descricao"] = desc_opcao
+                            nova_opcao["preco"] = float(preco_opcao)
+                            nova_opcao["desconto_percentual"] = float(desc_opcao_pct)
+                            nova_opcao["servicos"] = servicos_editados
+                            nova_opcao["total_servicos"] = sum(
+                                aplicar_desconto(
+                                    s.get("valor", 0),
+                                    s.get("desconto_percentual", 0),
+                                )
+                                for s in servicos_editados
+                            )
+                            opcoes_editadas.append(nova_opcao)
+
+                            preview_orc = copy.deepcopy(o)
+                            preview_orc["itens"] = itens_editados
+                            preview_orc["opcoes_equipamentos"] = [nova_opcao]
+                            preview_orc["desconto_percentual"] = float(desconto_geral)
+
+                            st.caption(
+                                f"Total desta opção: "
+                                f"{dinheiro(total_opcao_orcamento(preview_orc, nova_opcao))}"
+                            )
+
+            # ---------------------------------------------
+            # ADICIONAR ITEM MANUAL
+            # ---------------------------------------------
+            with st.expander("Adicionar item"):
+                novo_desc = st.text_input(
+                    "Descrição",
+                    key=f"adm_novo_desc_{numero}",
+                )
+                nc1, nc2 = st.columns(2)
+
+                with nc1:
+                    nova_qtd = st.number_input(
+                        "Quantidade",
+                        min_value=0.0,
+                        value=1.0,
+                        step=1.0,
+                        key=f"adm_nova_qtd_{numero}",
                     )
 
-                    c1, c2 = st.columns(2)
-
-                    with c1:
-                        qtd_serv = st.number_input(
-                            "Quantidade",
-                            min_value=0.0,
-                            value=1.0,
-                            step=1.0,
-                            key=f"novo_serv_qtd_{numero}",
-                        )
-
-                    with c2:
-                        preco_serv = st.number_input(
-                            "Valor unitário",
-                            min_value=0.0,
-                            value=0.0,
-                            step=1.0,
-                            key=f"novo_serv_preco_{numero}",
-                        )
-
-                    adicionar = st.checkbox(
-                        "Adicionar este serviço ao salvar",
-                        key=f"add_serv_{numero}",
+                with nc2:
+                    nova_un = st.selectbox(
+                        "Unidade",
+                        UNIDADES_ITEM,
+                        key=f"adm_nova_un_{numero}",
                     )
 
-                    if adicionar and desc_serv.strip():
-                        item_novo = montar_item(
-                            desc_serv.strip(),
-                            qtd_serv,
-                            "serviço",
-                            preco_serv,
-                            origem="adm",
-                        )
+                nc3, nc4 = st.columns(2)
 
-            obs_edit = st.text_area(
-                "Observações do orçamento",
-                value=o.get("observacoes", ""),
-                key=f"obs_orc_{numero}",
-            )
+                with nc3:
+                    novo_valor = st.number_input(
+                        "Valor unitário",
+                        min_value=0.0,
+                        value=0.0,
+                        step=1.0,
+                        key=f"adm_novo_valor_{numero}",
+                    )
 
-            total_prev = calcular_total(itens_editados)
+                with nc4:
+                    novo_desconto = st.number_input(
+                        "Desconto (%)",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=0.0,
+                        step=1.0,
+                        key=f"adm_novo_descpct_{numero}",
+                    )
 
-            if item_novo:
-                total_prev += (
-                    float(item_novo["quantidade"])
-                    * float(item_novo["valor_unitario"])
+                adicionar_novo = st.checkbox(
+                    "Adicionar este item ao salvar",
+                    key=f"adm_add_novo_{numero}",
                 )
 
-            st.metric(
-                "Total atualizado",
-                dinheiro(total_prev),
-            )
+            preview = copy.deepcopy(o)
+            preview["itens"] = itens_editados[:]
+            preview["opcoes_equipamentos"] = opcoes_editadas if opcoes else []
+            preview["desconto_percentual"] = float(desconto_geral)
+
+            if adicionar_novo and novo_desc.strip():
+                preview["itens"].append(
+                    montar_item(
+                        novo_desc.strip(),
+                        nova_qtd,
+                        nova_un,
+                        novo_valor,
+                        origem="adm",
+                        desconto_percentual=novo_desconto,
+                    )
+                )
+
+            if preview.get("opcoes_equipamentos"):
+                st.markdown("**Totais finais das opções**")
+                for opcao in preview["opcoes_equipamentos"]:
+                    st.write(
+                        f'{opcao.get("descricao","Aparelho")}: '
+                        f'**{dinheiro(total_opcao_orcamento(preview, opcao))}**'
+                    )
+            else:
+                subtotal = calcular_total(preview.get("itens", []))
+                st.caption(f"Subtotal: {dinheiro(subtotal)}")
+                st.metric(
+                    "Total final",
+                    dinheiro(total_orcamento(preview)),
+                )
 
             csave, cpdf = st.columns(2)
 
@@ -1880,83 +1959,44 @@ def aba_orcamentos():
                 if st.button(
                     "Salvar orçamento",
                     type="primary",
-                    key=f"salvar_orc_{numero}",
+                    key=f"adm_salvar_orc_{numero}",
                 ):
-                    novos_itens = itens_editados[:]
+                    itens_finais = itens_editados[:]
 
-                    if item_novo:
-                        novos_itens.append(item_novo)
-
-                    # Novo material criado dentro do orçamento
-                    # também é salvo no catálogo.
-                    if novo_material_catalogo:
-                        nome_mat = novo_material_catalogo[
-                            "nome"
-                        ]
-                        config["materiais"][
-                            nome_mat
-                        ] = novo_material_catalogo["dados"]
-
-                    for original in orcamentos:
-                        if original.get("numero") == numero:
-                            original["itens"] = novos_itens
-                            original[
-                                "observacoes"
-                            ] = obs_edit
-                            original[
-                                "atualizado_em"
-                            ] = datetime.now(
-                                FUSO_BRASILIA
-                            ).strftime(
-                                "%d/%m/%Y %H:%M"
+                    if adicionar_novo and novo_desc.strip():
+                        itens_finais.append(
+                            montar_item(
+                                novo_desc.strip(),
+                                nova_qtd,
+                                nova_un,
+                                novo_valor,
+                                origem="adm",
+                                desconto_percentual=novo_desconto,
                             )
-                            break
+                        )
+
+                    o["itens"] = itens_finais
+                    o["opcoes_equipamentos"] = (
+                        opcoes_editadas if opcoes else []
+                    )
+                    o["desconto_percentual"] = float(desconto_geral)
+                    o["atualizado_em"] = datetime.now(
+                        FUSO_BRASILIA
+                    ).strftime("%d/%m/%Y %H:%M")
 
                     try:
-                        if novo_material_catalogo:
-                            salvar_config()
-
-                        salvar_orcamentos(
-                            orcamentos
-                        )
-
-                        st.success(
-                            "Orçamento atualizado e salvo."
-                        )
+                        salvar_orcamentos(orcamentos)
+                        st.success("Orçamento atualizado.")
                         st.rerun()
-
                     except Exception as e:
-                        st.error(
-                            f"Erro ao salvar orçamento: {e}"
-                        )
+                        st.error(f"Erro ao salvar orçamento: {e}")
 
             with cpdf:
-                orc_pdf = copy.deepcopy(o)
-                orc_pdf["itens"] = itens_editados[:]
-
-                if item_novo:
-                    orc_pdf["itens"].append(
-                        item_novo
-                    )
-
-                orc_pdf[
-                    "observacoes"
-                ] = obs_edit
-
-                pdf_bytes = gerar_pdf(
-                    orc_pdf
-                )
-
+                pdf_bytes = gerar_pdf(preview)
                 compartilhar_pdf(
                     pdf_bytes,
-                    (
-                        f"orcamento_{numero}_"
-                        f"F_Climatizacao.pdf"
-                    ),
-                    titulo=(
-                        f"Orçamento {numero} "
-                        f"- F Climatização"
-                    ),
+                    f"orcamento_{numero}_F_Climatizacao.pdf",
+                    titulo=f"Orçamento {numero} - F Climatização",
                 )
 
 
@@ -2393,17 +2433,19 @@ def pagina_admin():
                 st.error("Senha incorreta.")
         return
 
-    tabs = st.tabs(["Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
+    tabs = st.tabs(["Orçamentos", "Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
 
     with tabs[0]:
-        aba_servicos()
+        aba_orcamentos()
     with tabs[1]:
-        aba_materiais()
+        aba_servicos()
     with tabs[2]:
-        aba_aparelhos()
+        aba_materiais()
     with tabs[3]:
-        aba_regras()
+        aba_aparelhos()
     with tabs[4]:
+        aba_regras()
+    with tabs[5]:
         aba_empresa()
 
     st.divider()
@@ -4117,10 +4159,10 @@ def pagina_cliente():
 
             for opcao in opcoes_pdf:
                 preco_eq = float(opcao.get("preco", 0) or 0)
-                total_servicos_opcao = float(
-                    opcao.get("total_servicos", 0) or 0
+                total_opcao = total_opcao_orcamento(
+                    ultimo,
+                    opcao,
                 )
-                total_opcao = total + preco_eq + total_servicos_opcao
 
                 detalhes_servicos = ""
                 if opcao.get("servicos"):
