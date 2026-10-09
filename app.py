@@ -247,6 +247,110 @@ hr{border-color:#243147!important;}
   margin-top:4px;
   line-height:1.35;
 }
+.finance-hero{
+  background:
+    linear-gradient(135deg,rgba(8,120,232,.30),rgba(5,39,93,.96) 58%,rgba(255,122,0,.14));
+  border:1px solid rgba(24,145,255,.45);
+  border-radius:22px;
+  padding:18px;
+  margin:8px 0 16px 0;
+}
+.finance-kicker{
+  color:#8fc9ff;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.finance-title{
+  color:#fff;
+  font-size:24px;
+  font-weight:950;
+  margin-top:3px;
+  line-height:1.1;
+}
+.finance-sub{
+  color:#c4d7eb;
+  font-size:12.5px;
+  margin-top:7px;
+  line-height:1.45;
+}
+.finance-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  margin:10px 0 16px 0;
+}
+.finance-card{
+  background:linear-gradient(145deg,#0f1723,#111d2d);
+  border:1px solid #263a54;
+  border-radius:17px;
+  padding:13px;
+  min-width:0;
+}
+.finance-card-label{
+  color:#8ca0b7;
+  font-size:10.5px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.finance-card-value{
+  color:#fff;
+  font-size:20px;
+  font-weight:900;
+  margin-top:4px;
+  overflow-wrap:anywhere;
+}
+.finance-card-value.positive{color:#45d483;}
+.finance-card-value.orange{color:#ff9a36;}
+.finance-card-value.blue{color:#54b4ff;}
+.finance-bar-row{
+  margin:10px 0;
+}
+.finance-bar-head{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:11px;
+  color:#c7d3e2;
+  margin-bottom:5px;
+}
+.finance-bar-track{
+  width:100%;
+  height:9px;
+  background:#111824;
+  border:1px solid #24344a;
+  border-radius:999px;
+  overflow:hidden;
+}
+.finance-bar-fill{
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg,#0878e8,#18a0fb);
+}
+.finance-pay{
+  background:#0e141e;
+  border:1px solid #26354a;
+  border-left:4px solid #ff7a00;
+  border-radius:14px;
+  padding:11px 12px;
+  margin:8px 0;
+}
+.finance-pay-name{
+  color:#fff;
+  font-size:12px;
+  font-weight:800;
+}
+.finance-pay-meta{
+  color:#8fa2b8;
+  font-size:10.5px;
+  margin-top:3px;
+}
+@media(max-width:520px){
+  .finance-grid{grid-template-columns:1fr 1fr;}
+  .finance-card-value{font-size:18px;}
+}
 .equipment-option{
   background:#0e141e;
   border:1px solid #26354a;
@@ -807,6 +911,54 @@ def salvar_orcamentos(lista):
 
 
 
+FORMAS_PAGAMENTO = [
+    "Pix",
+    "Dinheiro à vista",
+    "Débito",
+    "Crédito à vista",
+    "Crédito parcelado",
+    "Dinheiro parcelado",
+    "Transferência bancária",
+    "Outro",
+]
+
+
+def pagamento_exige_parcelas(forma):
+    return forma in (
+        "Crédito parcelado",
+        "Dinheiro parcelado",
+    )
+
+
+def nome_mes(numero):
+    nomes = {
+        1: "Janeiro",
+        2: "Fevereiro",
+        3: "Março",
+        4: "Abril",
+        5: "Maio",
+        6: "Junho",
+        7: "Julho",
+        8: "Agosto",
+        9: "Setembro",
+        10: "Outubro",
+        11: "Novembro",
+        12: "Dezembro",
+    }
+    return nomes.get(int(numero), str(numero))
+
+
+def extrair_mes_ano(data_texto):
+    try:
+        data = datetime.strptime(
+            str(data_texto),
+            "%d/%m/%Y %H:%M",
+        )
+        return data.month, data.year
+    except Exception:
+        return None, None
+
+
 def carregar_financeiro():
     try:
         content, _ = github_get_file(DATA_REPO, FINANCE_FILE)
@@ -874,7 +1026,7 @@ def total_item_liquido_financeiro(item):
     return aplicar_desconto(qtd * valor, desconto)
 
 
-def snapshot_faturamento(orcamento, financeiro):
+def snapshot_faturamento(orcamento, financeiro, pagamento=None):
     """
     Cria um retrato financeiro do orçamento no momento do faturamento.
     Serviços geram receita, porém não custo de estoque.
@@ -984,6 +1136,7 @@ def snapshot_faturamento(orcamento, financeiro):
         "custo": custo,
         "lucro": receita_final - custo,
         "desconto_geral": desconto_geral,
+        "pagamento": copy.deepcopy(pagamento or {}),
     }
 
 
@@ -992,6 +1145,7 @@ def alterar_status_orcamento(
     orcamento,
     novo_status,
     financeiro,
+    pagamento=None,
 ):
     numero = str(orcamento.get("numero", "")).zfill(4)
     status_anterior = orcamento.get("status", "Orçamento")
@@ -1006,6 +1160,7 @@ def alterar_status_orcamento(
         ] = snapshot_faturamento(
             orcamento,
             financeiro,
+            pagamento=pagamento,
         )
 
     elif status_anterior == "Faturado / Concluído":
@@ -1889,9 +2044,52 @@ def aba_orcamentos():
                 key=f"adm_status_{numero}",
             )
 
+            pagamento_status = None
+
+            if (
+                novo_status == "Faturado / Concluído"
+                and status_atual != "Faturado / Concluído"
+            ):
+                st.markdown("#### Forma de pagamento")
+
+                forma_pagamento = st.selectbox(
+                    "Método de pagamento",
+                    FORMAS_PAGAMENTO,
+                    key=f"adm_pagamento_forma_{numero}",
+                )
+
+                parcelas = 1
+                if pagamento_exige_parcelas(forma_pagamento):
+                    parcelas = st.number_input(
+                        "Número de parcelas",
+                        min_value=2,
+                        max_value=60,
+                        value=2,
+                        step=1,
+                        key=f"adm_pagamento_parcelas_{numero}",
+                    )
+
+                observacao_pagamento = st.text_input(
+                    "Observação do pagamento",
+                    placeholder="Opcional",
+                    key=f"adm_pagamento_obs_{numero}",
+                )
+
+                pagamento_status = {
+                    "forma": forma_pagamento,
+                    "parcelas": int(parcelas),
+                    "observacao": observacao_pagamento.strip(),
+                }
+
             if novo_status != status_atual:
+                texto_botao = (
+                    "Faturar / concluir venda"
+                    if novo_status == "Faturado / Concluído"
+                    else f"Aplicar status: {novo_status}"
+                )
+
                 if st.button(
-                    f"Aplicar status: {novo_status}",
+                    texto_botao,
                     type="primary",
                     use_container_width=True,
                     key=f"adm_aplicar_status_{numero}",
@@ -1902,6 +2100,7 @@ def aba_orcamentos():
                             o,
                             novo_status,
                             financeiro,
+                            pagamento=pagamento_status,
                         )
                         st.success("Status atualizado.")
                         st.rerun()
@@ -3052,55 +3251,276 @@ def aba_empresa():
 # ADMIN
 # =========================================================
 
-def aba_faturamento():
-    secao(
-        "Faturamento",
-        "Vendas concluídas, custos privados e resultado realizado.",
+def pagina_central_faturamento():
+    cabecalho(admin=True)
+
+    if st.button(
+        "← Voltar ao painel administrativo",
+        use_container_width=True,
+        key="voltar_central_faturamento",
+    ):
+        st.session_state["admin_view"] = "painel"
+        st.rerun()
+
+    st.markdown(
+        """
+        <div class="finance-hero">
+          <div class="finance-kicker">Gestão financeira</div>
+          <div class="finance-title">Central de Faturamento</div>
+          <div class="finance-sub">
+            Acompanhe vendas concluídas, custos, lucro, formas de pagamento
+            e desempenho por período.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     financeiro = carregar_financeiro()
-    movimentacoes = financeiro.get("movimentacoes", {})
+    movimentacoes = list(
+        financeiro.get("movimentacoes", {}).values()
+    )
 
     if not movimentacoes:
         st.info(
             "Nenhuma venda faturada no momento. "
             "Quando um orçamento for marcado como Faturado / Concluído, "
-            "ele aparecerá aqui automaticamente."
+            "ele aparecerá aqui."
         )
         return
 
-    movimentos = list(movimentacoes.values())
-
-    receita_total = sum(
-        float(m.get("receita", 0) or 0)
-        for m in movimentos
+    anos_disponiveis = sorted(
+        {
+            ano
+            for mov in movimentacoes
+            for _, ano in [extrair_mes_ano(mov.get("data_faturamento"))]
+            if ano is not None
+        },
+        reverse=True,
     )
-    custo_total = sum(
-        float(m.get("custo", 0) or 0)
-        for m in movimentos
-    )
-    lucro_total = receita_total - custo_total
 
-    c1, c2, c3 = st.columns(3)
+    ano_atual = datetime.now(FUSO_BRASILIA).year
+    if ano_atual not in anos_disponiveis:
+        anos_disponiveis.insert(0, ano_atual)
+
+    c1, c2 = st.columns(2)
+
     with c1:
-        st.metric("Faturado", dinheiro(receita_total))
-    with c2:
-        st.metric("Custos", dinheiro(custo_total))
-    with c3:
-        st.metric("Lucro", dinheiro(lucro_total))
+        ano_filtro = st.selectbox(
+            "Ano",
+            anos_disponiveis,
+            key="finance_ano",
+        )
 
-    st.caption(
-        f"{len(movimentos)} venda(s) concluída(s). "
-        "Reverter o status do orçamento remove a venda desta central."
+    with c2:
+        meses = ["Todos"] + [
+            nome_mes(i)
+            for i in range(1, 13)
+        ]
+        mes_nome = st.selectbox(
+            "Mês",
+            meses,
+            key="finance_mes",
+        )
+
+    mes_filtro = None
+    if mes_nome != "Todos":
+        mes_filtro = [
+            i
+            for i in range(1, 13)
+            if nome_mes(i) == mes_nome
+        ][0]
+
+    filtradas = []
+
+    for mov in movimentacoes:
+        mes, ano = extrair_mes_ano(
+            mov.get("data_faturamento")
+        )
+
+        if ano != ano_filtro:
+            continue
+
+        if mes_filtro is not None and mes != mes_filtro:
+            continue
+
+        filtradas.append(mov)
+
+    receita = sum(
+        float(m.get("receita", 0) or 0)
+        for m in filtradas
     )
+    custo = sum(
+        float(m.get("custo", 0) or 0)
+        for m in filtradas
+    )
+    lucro = receita - custo
+    qtd = len(filtradas)
+    ticket = receita / qtd if qtd else 0.0
+    margem = (lucro / receita * 100) if receita > 0 else 0.0
+
+    periodo_texto = (
+        f"{mes_nome} de {ano_filtro}"
+        if mes_nome != "Todos"
+        else f"Ano de {ano_filtro}"
+    )
+
+    st.caption(f"Período selecionado: {periodo_texto}")
+
+    st.markdown(
+        f"""
+        <div class="finance-grid">
+          <div class="finance-card">
+            <div class="finance-card-label">Faturamento</div>
+            <div class="finance-card-value blue">{dinheiro(receita)}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Lucro</div>
+            <div class="finance-card-value positive">{dinheiro(lucro)}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Custos</div>
+            <div class="finance-card-value orange">{dinheiro(custo)}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Margem</div>
+            <div class="finance-card-value">{margem:.1f}%</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Vendas concluídas</div>
+            <div class="finance-card-value">{qtd}</div>
+          </div>
+          <div class="finance-card">
+            <div class="finance-card-label">Ticket médio</div>
+            <div class="finance-card-value">{dinheiro(ticket)}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # -----------------------------------------------------
+    # MÉTODOS DE PAGAMENTO
+    # -----------------------------------------------------
+    secao(
+        "Formas de pagamento",
+        "Distribuição das vendas concluídas no período.",
+    )
+
+    pagamentos = {}
+
+    for mov in filtradas:
+        pagamento = mov.get("pagamento", {})
+        forma = pagamento.get("forma") or "Não informado"
+
+        pagamentos.setdefault(
+            forma,
+            {
+                "qtd": 0,
+                "valor": 0.0,
+            },
+        )
+
+        pagamentos[forma]["qtd"] += 1
+        pagamentos[forma]["valor"] += float(
+            mov.get("receita", 0) or 0
+        )
+
+    for forma, dados in sorted(
+        pagamentos.items(),
+        key=lambda x: x[1]["valor"],
+        reverse=True,
+    ):
+        meta = f'{dados["qtd"]} venda(s) • {dinheiro(dados["valor"])}'
+
+        st.markdown(
+            f"""
+            <div class="finance-pay">
+              <div class="finance-pay-name">{forma}</div>
+              <div class="finance-pay-meta">{meta}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # -----------------------------------------------------
+    # EVOLUÇÃO MENSAL
+    # -----------------------------------------------------
+    if mes_nome == "Todos":
+        secao(
+            "Evolução mensal",
+            "Faturamento por mês no ano selecionado.",
+        )
+
+        totais_mes = {
+            i: 0.0
+            for i in range(1, 13)
+        }
+
+        for mov in movimentacoes:
+            mes, ano = extrair_mes_ano(
+                mov.get("data_faturamento")
+            )
+            if ano == ano_filtro and mes in totais_mes:
+                totais_mes[mes] += float(
+                    mov.get("receita", 0) or 0
+                )
+
+        maximo = max(totais_mes.values()) if totais_mes else 0.0
+
+        for mes in range(1, 13):
+            valor = totais_mes[mes]
+            largura = (
+                (valor / maximo) * 100
+                if maximo > 0
+                else 0
+            )
+
+            st.markdown(
+                f"""
+                <div class="finance-bar-row">
+                  <div class="finance-bar-head">
+                    <span>{nome_mes(mes)}</span>
+                    <strong>{dinheiro(valor)}</strong>
+                  </div>
+                  <div class="finance-bar-track">
+                    <div class="finance-bar-fill" style="width:{largura:.1f}%"></div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # -----------------------------------------------------
+    # VENDAS DO PERÍODO
+    # -----------------------------------------------------
+    secao(
+        "Vendas faturadas",
+        "Detalhamento das vendas concluídas no período.",
+    )
+
+    if not filtradas:
+        st.info("Nenhuma venda faturada neste período.")
+        return
 
     for mov in sorted(
-        movimentos,
-        key=lambda m: str(m.get("numero", "")),
+        filtradas,
+        key=lambda m: str(m.get("data_faturamento", "")),
         reverse=True,
     ):
         numero = mov.get("numero", "----")
-        cliente = mov.get("cliente", {}).get("nome", "Cliente")
+        cliente = mov.get("cliente", {}).get(
+            "nome",
+            "Cliente",
+        )
+        pagamento = mov.get("pagamento", {})
+        forma = pagamento.get("forma", "Não informado")
+        parcelas = int(pagamento.get("parcelas", 1) or 1)
+
+        if parcelas > 1:
+            forma_exibida = f"{forma} • {parcelas}x"
+        else:
+            forma_exibida = forma
 
         with st.expander(
             f"Venda {numero} • {cliente} • {dinheiro(mov.get('receita',0))}"
@@ -3109,23 +3529,50 @@ def aba_faturamento():
                 f"**Faturado em:** {mov.get('data_faturamento','')}"
             )
             st.write(
-                f"**Receita:** {dinheiro(mov.get('receita',0))}"
+                f"**Pagamento:** {forma_exibida}"
             )
-            st.write(
-                f"**Custo:** {dinheiro(mov.get('custo',0))}"
-            )
-            st.write(
-                f"**Lucro:** {dinheiro(mov.get('lucro',0))}"
-            )
+
+            if pagamento.get("observacao"):
+                st.caption(
+                    pagamento.get("observacao")
+                )
+
+            vc1, vc2, vc3 = st.columns(3)
+            with vc1:
+                st.metric(
+                    "Receita",
+                    dinheiro(mov.get("receita", 0)),
+                )
+            with vc2:
+                st.metric(
+                    "Custo",
+                    dinheiro(mov.get("custo", 0)),
+                )
+            with vc3:
+                st.metric(
+                    "Lucro",
+                    dinheiro(mov.get("lucro", 0)),
+                )
 
             st.markdown("#### Itens")
 
             for linha in mov.get("linhas", []):
+                origem = linha.get("origem", "")
+                custo_linha = float(
+                    linha.get("custo_total", 0) or 0
+                )
+                venda_linha = float(
+                    linha.get("valor_venda", 0) or 0
+                )
+                lucro_linha = venda_linha - custo_linha
+
                 st.write(
                     f'**{linha.get("descricao","Item")}** — '
-                    f'venda {dinheiro(linha.get("valor_venda",0))} • '
-                    f'custo {dinheiro(linha.get("custo_total",0))}'
+                    f'venda {dinheiro(venda_linha)} • '
+                    f'custo {dinheiro(custo_linha)} • '
+                    f'resultado {dinheiro(lucro_linha)}'
                 )
+
 
 
 def pagina_admin():
@@ -3133,6 +3580,7 @@ def pagina_admin():
 
     if st.button("← Voltar para área do cliente", use_container_width=True):
         st.session_state["pagina"] = "cliente"
+        st.session_state["admin_view"] = "painel"
         st.query_params.clear()
         st.rerun()
 
@@ -3146,15 +3594,41 @@ def pagina_admin():
         if st.button("Entrar no painel", type="primary", use_container_width=True):
             if senha == ADMIN_KEY:
                 st.session_state["admin_logado"] = True
+                st.session_state["admin_view"] = "painel"
                 st.rerun()
             else:
                 st.error("Senha incorreta.")
         return
 
+    if st.session_state.get("admin_view") == "faturamento":
+        pagina_central_faturamento()
+        return
+
+    st.markdown(
+        """
+        <div class="info-card">
+          <div class="card-title">Central de Faturamento</div>
+          <div class="card-text">
+            Consulte faturamento, custos, lucro, formas de pagamento
+            e desempenho por mês e ano.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button(
+        "ABRIR CENTRAL DE FATURAMENTO",
+        type="primary",
+        use_container_width=True,
+        key="abrir_central_faturamento",
+    ):
+        st.session_state["admin_view"] = "faturamento"
+        st.rerun()
+
     tabs = st.tabs(
         [
             "Orçamentos",
-            "Faturamento",
             "Serviços",
             "Materiais",
             "Aparelhos",
@@ -3166,16 +3640,14 @@ def pagina_admin():
     with tabs[0]:
         aba_orcamentos()
     with tabs[1]:
-        aba_faturamento()
-    with tabs[2]:
         aba_servicos()
-    with tabs[3]:
+    with tabs[2]:
         aba_materiais()
-    with tabs[4]:
+    with tabs[3]:
         aba_aparelhos()
-    with tabs[5]:
+    with tabs[4]:
         aba_regras()
-    with tabs[6]:
+    with tabs[5]:
         aba_empresa()
 
     st.divider()
