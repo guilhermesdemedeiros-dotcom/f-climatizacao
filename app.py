@@ -383,37 +383,99 @@ def completar_dict(base, padrao):
 
 
 def migrar_config(dados):
-    dados = completar_dict(dados, DEFAULT_CONFIG)
+    """
+    Completa somente a estrutura necessária sem recriar itens de catálogo
+    que o administrador renomeou ou excluiu.
 
-    # Serviços removidos do catálogo padrão
-    dados.get("servicos", {}).pop("Reinstalação", None)
-    dados.get("servicos", {}).pop("Manutenção", None)
+    Serviços, materiais e aparelhos são catálogos editáveis:
+    se já existem no config.json, o conteúdo salvo pelo ADM é respeitado.
+    """
+    if not isinstance(dados, dict):
+        return copy.deepcopy(DEFAULT_CONFIG)
 
-    # Adicionais específicos antigos deixam de ser usados
-    dados.pop("adicionais", None)
+    dados = copy.deepcopy(dados)
 
-    # Valores-base novos só substituem zero/ausente
-    base_precos = DEFAULT_CONFIG["servicos"]
-    for servico in ["Instalação", "Carga de gás", "Desinstalação"]:
-        if servico not in dados["servicos"]:
-            dados["servicos"][servico] = copy.deepcopy(base_precos[servico])
-        else:
-            dados["servicos"][servico]["ativo"] = dados["servicos"][servico].get("ativo", True)
-            dados["servicos"][servico]["mostrar_cliente"] = dados["servicos"][servico].get("mostrar_cliente", True)
-            dados["servicos"][servico]["descricao"] = dados["servicos"][servico].get(
-                "descricao", base_precos[servico]["descricao"]
-            )
-            dados["servicos"][servico].setdefault("precos", {})
-            for cap, valor in base_precos[servico]["precos"].items():
-                atual = dados["servicos"][servico]["precos"].get(cap)
-                if atual in (None, 0, 0.0, ""):
-                    dados["servicos"][servico]["precos"][cap] = valor
+    # -----------------------------------------------------
+    # EMPRESA E REGRAS: podem receber novos campos padrão
+    # -----------------------------------------------------
+    dados["empresa"] = completar_dict(
+        dados.get("empresa", {}),
+        DEFAULT_CONFIG["empresa"],
+    )
+    dados["regras"] = completar_dict(
+        dados.get("regras", {}),
+        DEFAULT_CONFIG["regras"],
+    )
 
-    # Migração de equipamentos antigos para estrutura nova
+    # -----------------------------------------------------
+    # SERVIÇOS: só usa os padrões se o catálogo inteiro
+    # ainda não existir. Nunca recria um serviço excluído.
+    # -----------------------------------------------------
+    if "servicos" not in dados or not isinstance(dados.get("servicos"), dict):
+        dados["servicos"] = copy.deepcopy(DEFAULT_CONFIG["servicos"])
+
+    dados["servicos"].pop("Reinstalação", None)
+    dados["servicos"].pop("Manutenção", None)
+
+    servicos_normalizados = {}
+
+    for nome, servico in dados.get("servicos", {}).items():
+        if not isinstance(servico, dict):
+            servico = {}
+
+        item = copy.deepcopy(servico)
+        item.setdefault("ativo", True)
+        item.setdefault("mostrar_cliente", True)
+        item.setdefault("descricao", "")
+        item.setdefault("precos", {})
+
+        if not isinstance(item["precos"], dict):
+            item["precos"] = {}
+
+        # Apenas garante que as capacidades existam.
+        # Não substitui 0 por preço padrão.
+        for cap in CAPACIDADES:
+            item["precos"].setdefault(cap, 0.0)
+
+        servicos_normalizados[nome] = item
+
+    dados["servicos"] = servicos_normalizados
+
+    # -----------------------------------------------------
+    # MATERIAIS: preserva exatamente exclusões/renomes.
+    # Padrões entram somente se nunca houve catálogo.
+    # -----------------------------------------------------
+    if "materiais" not in dados or not isinstance(dados.get("materiais"), dict):
+        dados["materiais"] = copy.deepcopy(DEFAULT_CONFIG["materiais"])
+
+    materiais_normalizados = {}
+
+    for nome, material in dados.get("materiais", {}).items():
+        if not isinstance(material, dict):
+            material = {}
+
+        item = copy.deepcopy(material)
+        item.setdefault("unidade", "unidade")
+        item.setdefault("preco", 0.0)
+        item.setdefault("ativo", True)
+
+        materiais_normalizados[nome] = item
+
+    dados["materiais"] = materiais_normalizados
+
+    # -----------------------------------------------------
+    # APARELHOS: preserva catálogo atual e migra formato
+    # antigo quando necessário.
+    # -----------------------------------------------------
+    if "equipamentos" not in dados or not isinstance(dados.get("equipamentos"), dict):
+        dados["equipamentos"] = {}
+
     novos = {}
+
     for chave, eq in dados.get("equipamentos", {}).items():
         if not isinstance(eq, dict):
             continue
+
         eq2 = copy.deepcopy(eq)
         eq2.setdefault("id", chave)
         eq2.setdefault("marca", "")
@@ -422,15 +484,18 @@ def migrar_config(dados):
         eq2.setdefault("preco", 0.0)
         eq2.setdefault("ativo", False)
 
-        # tenta aproveitar capacidade do nome antigo
-        if "capacidade" not in eq or not eq.get("capacidade"):
+        if not eq.get("capacidade"):
             for cap in CAPACIDADES:
-                if cap in chave:
+                if cap in str(chave):
                     eq2["capacidade"] = cap
                     break
 
         novos[str(eq2["id"])] = eq2
+
     dados["equipamentos"] = novos
+
+    # Campo legado que não é mais usado.
+    dados.pop("adicionais", None)
 
     return dados
 
@@ -1906,7 +1971,7 @@ def aba_servicos():
     )
 
     st.caption(
-        "Alterações aqui afetam os próximos orçamentos e as futuras edições. "
+        "Renomear altera o serviço existente; excluir remove do catálogo após salvar. "
         "Orçamentos já salvos mantêm os dados registrados até serem editados."
     )
 
