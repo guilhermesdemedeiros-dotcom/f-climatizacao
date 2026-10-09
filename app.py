@@ -2296,10 +2296,10 @@ def editor_orcamento_cliente():
     st.markdown(
         """
         <div class="info-card">
-          <div class="card-title">Edição do orçamento</div>
+          <div class="card-title">Edição completa</div>
           <div class="card-text">
-            Aqui você altera apenas os itens deste orçamento.
-            Preços e cadastros principais continuam protegidos no ADM.
+            Refaça o orçamento usando os mesmos cadastros e preços do sistema.
+            Você pode trocar aparelhos, serviços, materiais, quantidades e dados do local.
           </div>
         </div>
         """,
@@ -2352,369 +2352,874 @@ def editor_orcamento_cliente():
         st.warning("Esse orçamento não está mais disponível para edição.")
         return
 
+    numero = str(orcamento.get("numero", "")).zfill(4)
     cliente = orcamento.get("cliente", {})
-    total_itens = calcular_total(orcamento.get("itens", []))
-    opcoes = orcamento.get("opcoes_equipamentos", [])
+    itens_atuais = orcamento.get("itens", [])
+    opcoes_atuais = orcamento.get("opcoes_equipamentos", [])
 
     st.divider()
     st.markdown(
-        f'<span class="budget-number">#{orcamento.get("numero","")}</span>',
+        f'<span class="budget-number">#{numero}</span>',
         unsafe_allow_html=True,
     )
-    st.write(f'**Cliente:** {cliente.get("nome","")}')
     st.caption(
-        f'{orcamento.get("data","")} • {cliente.get("cidade","")} • '
-        f'{cliente.get("telefone","")}'
+        f'{orcamento.get("data","")} • '
+        f'{cliente.get("nome","")} • '
+        f'{cliente.get("cidade","")}'
     )
 
-    if opcoes:
-        st.caption(
-            f"Orçamento comparativo com {len(opcoes)} opção(ões) de aparelho."
-        )
-        if total_itens > 0:
-            st.metric("Itens comuns", dinheiro(total_itens))
+    # -----------------------------------------------------
+    # ESTADO ATUAL DO ORÇAMENTO
+    # -----------------------------------------------------
+
+    servicos_atuais = []
+    precos_servicos_atuais = {}
+
+    if opcoes_atuais:
+        for opcao in opcoes_atuais:
+            for servico in opcao.get("servicos", []):
+                descricao = str(servico.get("descricao", ""))
+                nome_base = descricao.split(" • ")[0].strip()
+                if nome_base and nome_base not in servicos_atuais:
+                    servicos_atuais.append(nome_base)
+                if nome_base:
+                    precos_servicos_atuais[nome_base] = float(
+                        servico.get("valor", 0) or 0
+                    )
     else:
-        st.metric("Total atual", dinheiro(total_itens))
-
-    # -----------------------------------------------------
-    # REMOVER ITENS ATUAIS
-    # -----------------------------------------------------
-    with st.expander("Itens atuais / remover"):
-        itens = orcamento.get("itens", [])
-
-        if not itens:
-            st.caption("Nenhum item comum neste orçamento.")
-        else:
-            ids_remover = []
-
-            for idx, item in enumerate(itens):
-                iid = item.get("id") or f"item_{idx}"
-                qtd = float(item.get("quantidade", 0) or 0)
-                vu = float(item.get("valor_unitario", 0) or 0)
-                label = (
-                    f'{item.get("descricao","Item")} — '
-                    f'{qtd:g} {item.get("unidade","")} — {dinheiro(qtd * vu)}'
-                )
-
-                if st.checkbox(
-                    label,
-                    key=f"cliente_remover_item_{orcamento.get('numero')}_{iid}",
-                ):
-                    ids_remover.append(iid)
-
-            if ids_remover and st.button(
-                "Remover itens selecionados",
-                use_container_width=True,
-                key=f"cliente_btn_remover_itens_{orcamento.get('numero')}",
-            ):
-                novos = []
-
-                for idx, item in enumerate(itens):
-                    iid = item.get("id") or f"item_{idx}"
-                    if iid not in ids_remover:
-                        novos.append(item)
-
-                orcamento["itens"] = novos
-
-                try:
-                    salvar_orcamento_editado(
-                        orcamentos,
-                        orcamento,
+        for item in itens_atuais:
+            if item.get("origem") == "servico":
+                descricao = str(item.get("descricao", ""))
+                nome_base = descricao.split(" • ")[0].strip()
+                if nome_base and nome_base not in servicos_atuais:
+                    servicos_atuais.append(nome_base)
+                if nome_base:
+                    precos_servicos_atuais[nome_base] = float(
+                        item.get("valor_unitario", 0) or 0
                     )
-                    st.success("Itens removidos.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Não foi possível salvar: {e}")
+
+    materiais_atuais = {}
+    for item in itens_atuais:
+        if item.get("origem") == "material":
+            materiais_atuais[str(item.get("descricao", ""))] = {
+                "quantidade": float(item.get("quantidade", 1) or 0),
+                "unidade": item.get("unidade", "unidade"),
+                "preco": float(item.get("valor_unitario", 0) or 0),
+            }
+
+    outros_itens = [
+        copy.deepcopy(item)
+        for item in itens_atuais
+        if item.get("origem") not in ("servico", "material", "equipamento", "regra")
+    ]
+
+    item_equipamento_atual = next(
+        (
+            item
+            for item in itens_atuais
+            if item.get("origem") == "equipamento"
+        ),
+        None,
+    )
 
     # -----------------------------------------------------
-    # OPÇÕES DE APARELHOS EM ORÇAMENTO COMPARATIVO
+    # DADOS DO CLIENTE
     # -----------------------------------------------------
-    if opcoes:
-        with st.expander("Opções de aparelhos / serviços"):
-            opcoes_remover = []
-            servicos_remover = {}
 
-            for opcao in opcoes:
-                oid = str(opcao.get("id", ""))
-                st.markdown(
-                    f'**{opcao.get("descricao","Aparelho")}** — '
-                    f'{dinheiro(opcao.get("preco",0))}'
+    with st.expander("Dados do cliente"):
+        edit_nome = st.text_input(
+            "Nome",
+            value=cliente.get("nome", ""),
+            key=f"edit_nome_{numero}",
+        )
+        edit_telefone = st.text_input(
+            "Telefone / WhatsApp",
+            value=cliente.get("telefone", ""),
+            key=f"edit_telefone_{numero}",
+        )
+        edit_cidade = st.text_input(
+            "Cidade",
+            value=cliente.get("cidade", ""),
+            key=f"edit_cidade_{numero}",
+        )
+
+    # -----------------------------------------------------
+    # APARELHO / EQUIPAMENTOS
+    # -----------------------------------------------------
+
+    with st.expander("Aparelho / equipamentos", expanded=True):
+        opcoes_possui = [
+            "Sim, já tenho o aparelho",
+            "Não, quero comprar",
+            "Ainda estou avaliando",
+        ]
+
+        possui_atual = orcamento.get(
+            "possui_aparelho",
+            "Sim, já tenho o aparelho",
+        )
+        if possui_atual not in opcoes_possui:
+            possui_atual = "Sim, já tenho o aparelho"
+
+        edit_possui = st.radio(
+            "Situação do aparelho",
+            opcoes_possui,
+            index=opcoes_possui.index(possui_atual),
+            key=f"edit_possui_{numero}",
+        )
+
+        edit_modo_compra = None
+        edit_equipamento_unico = None
+        edit_opcoes_comparacao = []
+        edit_capacidade = orcamento.get("capacidade", "9.000 BTUs")
+
+        # Catálogo ativo + equipamentos antigos deste orçamento
+        catalogo_equipamentos = []
+
+        for eid, eq in config.get("equipamentos", {}).items():
+            if eq.get("ativo", False):
+                catalogo_equipamentos.append(
+                    {
+                        "id": str(eid),
+                        "marca": eq.get("marca", ""),
+                        "capacidade": eq.get("capacidade", ""),
+                        "tipo": eq.get("tipo", ""),
+                        "preco": float(eq.get("preco", 0) or 0),
+                        "descricao": nome_equipamento(eq),
+                    }
                 )
 
-                if st.checkbox(
-                    "Remover esta opção do orçamento",
-                    key=f"cliente_remover_opcao_{orcamento.get('numero')}_{oid}",
-                ):
-                    opcoes_remover.append(oid)
+        ids_catalogo = {str(eq["id"]) for eq in catalogo_equipamentos}
 
-                servicos_opcao = opcao.get("servicos", [])
-                if servicos_opcao:
-                    remover_indices = []
+        if item_equipamento_atual and orcamento.get("equipamento_id"):
+            eid_atual = str(orcamento.get("equipamento_id"))
+            if eid_atual not in ids_catalogo:
+                catalogo_equipamentos.append(
+                    {
+                        "id": eid_atual,
+                        "marca": "",
+                        "capacidade": orcamento.get("capacidade", ""),
+                        "tipo": "",
+                        "preco": float(
+                            item_equipamento_atual.get("valor_unitario", 0) or 0
+                        ),
+                        "descricao": item_equipamento_atual.get(
+                            "descricao",
+                            "Ar-condicionado",
+                        ),
+                    }
+                )
 
-                    for sidx, servico in enumerate(servicos_opcao):
-                        if st.checkbox(
-                            f'Remover {servico.get("descricao","Serviço")} — '
-                            f'{dinheiro(servico.get("valor",0))}',
-                            key=(
-                                f"cliente_remover_servico_opcao_"
-                                f"{orcamento.get('numero')}_{oid}_{sidx}"
+        for opcao in opcoes_atuais:
+            oid = str(opcao.get("id", ""))
+            if oid and oid not in {str(eq["id"]) for eq in catalogo_equipamentos}:
+                catalogo_equipamentos.append(
+                    {
+                        "id": oid,
+                        "marca": opcao.get("marca", ""),
+                        "capacidade": opcao.get("capacidade", ""),
+                        "tipo": opcao.get("tipo", ""),
+                        "preco": float(opcao.get("preco", 0) or 0),
+                        "descricao": opcao.get("descricao", "Ar-condicionado"),
+                    }
+                )
+
+        if edit_possui == "Não, quero comprar":
+            modos_compra = [
+                "Escolher um aparelho",
+                "Comparar aparelhos",
+            ]
+
+            modo_atual = orcamento.get("modo_compra")
+            if modo_atual not in modos_compra:
+                modo_atual = (
+                    "Comparar aparelhos"
+                    if opcoes_atuais
+                    else "Escolher um aparelho"
+                )
+
+            edit_modo_compra = st.radio(
+                "Como deseja montar o orçamento?",
+                modos_compra,
+                index=modos_compra.index(modo_atual),
+                horizontal=True,
+                key=f"edit_modo_compra_{numero}",
+            )
+
+            if edit_modo_compra == "Escolher um aparelho":
+                capacidade_atual = orcamento.get("capacidade")
+                if capacidade_atual not in CAPACIDADES:
+                    if item_equipamento_atual:
+                        capacidade_atual = next(
+                            (
+                                cap
+                                for cap in CAPACIDADES
+                                if cap in str(
+                                    item_equipamento_atual.get("descricao", "")
+                                )
                             ),
-                        ):
-                            remover_indices.append(sidx)
+                            CAPACIDADES[0],
+                        )
+                    else:
+                        capacidade_atual = CAPACIDADES[0]
 
-                    if remover_indices:
-                        servicos_remover[oid] = remover_indices
+                edit_capacidade = st.selectbox(
+                    "Capacidade desejada",
+                    CAPACIDADES,
+                    index=CAPACIDADES.index(capacidade_atual),
+                    key=f"edit_cap_unico_{numero}",
+                )
 
-                st.divider()
+                mostrar_referencia_capacidade(edit_capacidade)
 
-            if (opcoes_remover or servicos_remover) and st.button(
-                "Aplicar remoções das opções",
-                use_container_width=True,
-                key=f"cliente_btn_remover_opcoes_{orcamento.get('numero')}",
-            ):
-                novas_opcoes = []
-
-                for opcao in orcamento.get("opcoes_equipamentos", []):
-                    oid = str(opcao.get("id", ""))
-
-                    if oid in opcoes_remover:
-                        continue
-
-                    if oid in servicos_remover:
-                        opcao["servicos"] = [
-                            servico
-                            for idx, servico in enumerate(
-                                opcao.get("servicos", [])
-                            )
-                            if idx not in servicos_remover[oid]
-                        ]
-
-                    novas_opcoes.append(opcao)
-
-                orcamento["opcoes_equipamentos"] = novas_opcoes
-
-                try:
-                    salvar_orcamento_editado(
-                        orcamentos,
-                        orcamento,
+                disponiveis = [
+                    eq
+                    for eq in catalogo_equipamentos
+                    if eq.get("capacidade") == edit_capacidade
+                ]
+                disponiveis.sort(
+                    key=lambda item: (
+                        float(item.get("preco", 0) or 0),
+                        item.get("descricao", "").lower(),
                     )
-                    st.success("Alterações aplicadas.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Não foi possível salvar: {e}")
+                )
+
+                if disponiveis:
+                    labels = {
+                        f'{eq["descricao"]} — {dinheiro(eq["preco"])}': eq
+                        for eq in disponiveis
+                    }
+
+                    atual_id = str(orcamento.get("equipamento_id") or "")
+                    default_label = next(
+                        (
+                            label
+                            for label, eq in labels.items()
+                            if str(eq["id"]) == atual_id
+                        ),
+                        list(labels.keys())[0],
+                    )
+
+                    edit_label_unico = st.selectbox(
+                        "Aparelho",
+                        list(labels.keys()),
+                        index=list(labels.keys()).index(default_label),
+                        key=f"edit_eq_unico_{numero}",
+                    )
+
+                    edit_equipamento_unico = labels[edit_label_unico]
+                else:
+                    st.info("Nenhum aparelho dessa capacidade está disponível.")
+
+            else:
+                filtro_atual = (
+                    orcamento.get("capacidade")
+                    if orcamento.get("capacidade") in CAPACIDADES
+                    else CAPACIDADES[0]
+                )
+
+                filtro_cap = st.selectbox(
+                    "Capacidade para visualizar",
+                    CAPACIDADES,
+                    index=CAPACIDADES.index(filtro_atual),
+                    key=f"edit_filtro_cap_{numero}",
+                )
+                mostrar_referencia_capacidade(filtro_cap)
+
+                state_key = f"edit_eq_ids_{numero}"
+                if state_key not in st.session_state:
+                    st.session_state[state_key] = [
+                        str(opcao.get("id", ""))
+                        for opcao in opcoes_atuais
+                        if opcao.get("id")
+                    ]
+
+                ids_selecionados = set(
+                    str(x)
+                    for x in st.session_state.get(state_key, [])
+                )
+
+                visiveis = [
+                    eq
+                    for eq in catalogo_equipamentos
+                    if eq.get("capacidade") == filtro_cap
+                ]
+                visiveis.sort(
+                    key=lambda item: (
+                        float(item.get("preco", 0) or 0),
+                        item.get("descricao", "").lower(),
+                    )
+                )
+
+                if visiveis:
+                    st.caption(
+                        "Marque os modelos desejados. As seleções continuam salvas ao trocar os BTUs."
+                    )
+
+                for eq in visiveis:
+                    eid = str(eq["id"])
+                    wk = f"edit_eq_chk_{numero}_{eid}"
+
+                    if wk not in st.session_state:
+                        st.session_state[wk] = eid in ids_selecionados
+
+                    marcado = st.checkbox(
+                        f'{eq["descricao"]} — {dinheiro(eq["preco"])}',
+                        key=wk,
+                    )
+
+                    if marcado:
+                        ids_selecionados.add(eid)
+                    else:
+                        ids_selecionados.discard(eid)
+
+                st.session_state[state_key] = sorted(ids_selecionados)
+
+                edit_opcoes_comparacao = [
+                    eq
+                    for eq in catalogo_equipamentos
+                    if str(eq["id"]) in ids_selecionados
+                ]
+                edit_opcoes_comparacao.sort(
+                    key=lambda item: (
+                        BTU_NUM.get(item.get("capacidade"), 999999),
+                        float(item.get("preco", 0) or 0),
+                    )
+                )
+
+                if edit_opcoes_comparacao:
+                    st.markdown(
+                        f'<div class="capacity-ok">'
+                        f'{len(edit_opcoes_comparacao)} modelo(s) selecionado(s).'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    with st.expander("Ver selecionados"):
+                        for eq in edit_opcoes_comparacao:
+                            st.write(
+                                f'**{eq["descricao"]}** — {dinheiro(eq["preco"])}'
+                            )
+
+        else:
+            cap_atual = orcamento.get("capacidade")
+            opcoes_capacidade = CAPACIDADES + ["Não sei"]
+
+            if cap_atual not in opcoes_capacidade:
+                cap_atual = "Não sei"
+
+            edit_capacidade = st.selectbox(
+                "Capacidade do aparelho",
+                opcoes_capacidade,
+                index=opcoes_capacidade.index(cap_atual),
+                key=f"edit_cap_sem_compra_{numero}",
+            )
+
+            mostrar_referencia_capacidade(edit_capacidade)
 
     # -----------------------------------------------------
-    # ADICIONAR MATERIAL
+    # SERVIÇOS
     # -----------------------------------------------------
-    with st.expander("Adicionar material"):
+
+    with st.expander("Serviços"):
+        servicos_ativos = [
+            nome
+            for nome, dados in config.get("servicos", {}).items()
+            if dados.get("ativo", True)
+            and dados.get("mostrar_cliente", True)
+        ]
+
+        servicos_opcoes = servicos_ativos[:]
+        for nome in servicos_atuais:
+            if nome not in servicos_opcoes:
+                servicos_opcoes.append(nome)
+
+        defaults_servicos = [
+            nome
+            for nome in servicos_atuais
+            if nome in servicos_opcoes
+        ]
+
+        edit_servicos = st.multiselect(
+            "Serviços do orçamento",
+            servicos_opcoes,
+            default=defaults_servicos,
+            key=f"edit_servicos_{numero}",
+        )
+
+    # -----------------------------------------------------
+    # MATERIAIS / QUANTIDADES
+    # -----------------------------------------------------
+
+    with st.expander("Materiais"):
         materiais_ativos = {
             nome: dados
             for nome, dados in config.get("materiais", {}).items()
             if dados.get("ativo", True)
         }
 
-        if not materiais_ativos:
-            st.caption("Nenhum material ativo está cadastrado.")
-        else:
-            nomes_materiais = list(materiais_ativos.keys())
-            material_nome = st.selectbox(
-                "Material",
-                nomes_materiais,
-                key=f"cliente_edit_material_{orcamento.get('numero')}",
-            )
-            dados_material = materiais_ativos[material_nome]
-            unidade_material = dados_material.get("unidade", "unidade")
-            preco_material = float(dados_material.get("preco", 0) or 0)
+        nomes_materiais = list(materiais_ativos.keys())
+        for nome in materiais_atuais.keys():
+            if nome not in nomes_materiais:
+                nomes_materiais.append(nome)
 
-            quantidade_material = st.number_input(
-                f"Quantidade ({unidade_material})",
+        defaults_materiais = [
+            nome
+            for nome in materiais_atuais.keys()
+            if nome in nomes_materiais
+        ]
+
+        edit_materiais_nomes = st.multiselect(
+            "Materiais do orçamento",
+            nomes_materiais,
+            default=defaults_materiais,
+            key=f"edit_materiais_{numero}",
+        )
+
+        edit_materiais = []
+
+        for nome_material in edit_materiais_nomes:
+            dados_catalogo = materiais_ativos.get(nome_material, {})
+            dados_antigos = materiais_atuais.get(nome_material, {})
+
+            unidade = dados_catalogo.get(
+                "unidade",
+                dados_antigos.get("unidade", "unidade"),
+            )
+            preco = float(
+                dados_catalogo.get(
+                    "preco",
+                    dados_antigos.get("preco", 0),
+                )
+                or 0
+            )
+
+            qtd_default = float(
+                dados_antigos.get("quantidade", 1) or 1
+            )
+
+            quantidade = st.number_input(
+                f"{nome_material} • quantidade ({unidade})",
                 min_value=0.0,
-                value=1.0,
-                step=0.5 if unidade_material == "metro" else 1.0,
-                key=f"cliente_edit_material_qtd_{orcamento.get('numero')}",
+                value=qtd_default,
+                step=0.5 if unidade == "metro" else 1.0,
+                key=f"edit_mat_qtd_{numero}_{nome_material}",
             )
 
             st.caption(
-                f"Preço cadastrado: {dinheiro(preco_material)} / "
-                f"{unidade_material} • Total: "
-                f"{dinheiro(quantidade_material * preco_material)}"
+                f"{dinheiro(preco)} / {unidade} • "
+                f"Total: {dinheiro(quantidade * preco)}"
             )
 
-            if st.button(
-                "Adicionar material ao orçamento",
-                type="primary",
-                use_container_width=True,
-                key=f"cliente_add_material_{orcamento.get('numero')}",
-            ):
-                if quantidade_material <= 0:
-                    st.warning("Informe uma quantidade maior que zero.")
-                else:
-                    orcamento.setdefault("itens", []).append(
-                        montar_item(
-                            material_nome,
-                            quantidade_material,
-                            unidade_material,
-                            preco_material,
-                            origem="material",
+            if quantidade > 0:
+                edit_materiais.append(
+                    {
+                        "nome": nome_material,
+                        "quantidade": float(quantidade),
+                        "unidade": unidade,
+                        "preco": preco,
+                    }
+                )
+
+    # -----------------------------------------------------
+    # LOCAL / ANDAR / ÁREA
+    # -----------------------------------------------------
+
+    with st.expander("Local do serviço"):
+        tipos_imovel = [
+            "Casa",
+            "Apartamento",
+            "Comércio",
+            "Outro",
+        ]
+
+        tipo_atual = orcamento.get("tipo_imovel", "Casa")
+        if tipo_atual not in tipos_imovel:
+            tipo_atual = "Outro"
+
+        edit_tipo_imovel = st.selectbox(
+            "Tipo de imóvel",
+            tipos_imovel,
+            index=tipos_imovel.index(tipo_atual),
+            key=f"edit_tipo_imovel_{numero}",
+        )
+
+        edit_andar = 0
+        if edit_tipo_imovel == "Apartamento":
+            edit_andar = st.number_input(
+                "Andar/piso",
+                min_value=0,
+                value=int(orcamento.get("andar") or 1),
+                step=1,
+                key=f"edit_andar_{numero}",
+            )
+
+        area_atual = orcamento.get("area_ambiente", "Não sei")
+        opcoes_area_edit = OPCOES_AREA[:]
+
+        if area_atual not in opcoes_area_edit:
+            opcoes_area_edit.append(area_atual)
+
+        edit_area = st.selectbox(
+            "Tamanho aproximado do ambiente",
+            opcoes_area_edit,
+            index=opcoes_area_edit.index(area_atual),
+            key=f"edit_area_{numero}",
+        )
+
+        capacidade_para_area = None
+
+        if (
+            edit_possui == "Não, quero comprar"
+            and edit_modo_compra == "Escolher um aparelho"
+            and edit_equipamento_unico
+        ):
+            capacidade_para_area = edit_equipamento_unico.get("capacidade")
+        elif edit_possui != "Não, quero comprar":
+            capacidade_para_area = (
+                edit_capacidade
+                if edit_capacidade in CAPACIDADES
+                else None
+            )
+
+        mostrar_compatibilidade_area(
+            capacidade_para_area,
+            edit_area,
+        )
+
+    # -----------------------------------------------------
+    # ADICIONAL / OBSERVAÇÕES
+    # -----------------------------------------------------
+
+    with st.expander("Adicional e observações"):
+        adicional_atual = orcamento.get("adicional", {})
+        adicional_default = (
+            "Sim"
+            if adicional_atual.get("solicitado")
+            else "Não"
+        )
+
+        edit_adicional = st.radio(
+            "Precisa de algum serviço ou material adicional?",
+            ["Não", "Sim"],
+            index=["Não", "Sim"].index(adicional_default),
+            horizontal=True,
+            key=f"edit_adicional_{numero}",
+        )
+
+        edit_adicional_desc = ""
+
+        if edit_adicional == "Sim":
+            edit_adicional_desc = st.text_area(
+                "Descrição do adicional",
+                value=adicional_atual.get("descricao", ""),
+                key=f"edit_adicional_desc_{numero}",
+            )
+
+        edit_observacoes = st.text_area(
+            "Outras observações",
+            value=orcamento.get("observacoes", ""),
+            key=f"edit_observacoes_{numero}",
+        )
+
+    # -----------------------------------------------------
+    # OUTROS ITENS ANTIGOS / MANUAIS
+    # -----------------------------------------------------
+
+    manter_outros = []
+
+    if outros_itens:
+        with st.expander("Outros itens existentes"):
+            st.caption(
+                "Itens manuais de versões anteriores. Desmarque para remover."
+            )
+
+            for idx, item in enumerate(outros_itens):
+                iid = item.get("id") or f"outro_{idx}"
+                qtd = float(item.get("quantidade", 0) or 0)
+                vu = float(item.get("valor_unitario", 0) or 0)
+
+                manter = st.checkbox(
+                    (
+                        f'{item.get("descricao","Item")} — '
+                        f'{qtd:g} {item.get("unidade","")} — '
+                        f'{dinheiro(qtd * vu)}'
+                    ),
+                    value=True,
+                    key=f"edit_manter_outro_{numero}_{iid}",
+                )
+
+                if manter:
+                    manter_outros.append(copy.deepcopy(item))
+
+    # -----------------------------------------------------
+    # PRÉVIA E SALVAR
+    # -----------------------------------------------------
+
+    st.divider()
+    st.caption(
+        "Os preços unitários continuam vindo dos cadastros do sistema. "
+        "Nesta área você altera somente a composição do orçamento."
+    )
+
+    if st.button(
+        "SALVAR ALTERAÇÕES DO ORÇAMENTO",
+        type="primary",
+        use_container_width=True,
+        key=f"salvar_edicao_completa_{numero}",
+    ):
+        if not edit_nome.strip():
+            st.warning("Informe o nome do cliente.")
+            return
+
+        if not edit_telefone.strip():
+            st.warning("Informe o telefone/WhatsApp.")
+            return
+
+        novos_itens = []
+        novas_opcoes = []
+        novo_equipamento_id = None
+        nova_capacidade = edit_capacidade
+
+        # Mantém itens manuais escolhidos
+        novos_itens.extend(manter_outros)
+
+        # Materiais
+        for material in edit_materiais:
+            novos_itens.append(
+                montar_item(
+                    material["nome"],
+                    material["quantidade"],
+                    material["unidade"],
+                    material["preco"],
+                    origem="material",
+                )
+            )
+
+        # Regra automática de apartamento
+        if edit_tipo_imovel == "Apartamento" and int(edit_andar) >= 2:
+            valor_andar = float(
+                config.get("regras", {}).get(
+                    "adicional_apartamento_2_mais",
+                    0,
+                )
+                or 0
+            )
+
+            if valor_andar > 0:
+                novos_itens.append(
+                    montar_item(
+                        f"Adicional de acesso • {int(edit_andar)}º piso",
+                        1,
+                        "serviço",
+                        valor_andar,
+                        origem="regra",
+                    )
+                )
+
+        # Compra de aparelho
+        if edit_possui == "Não, quero comprar":
+            if edit_modo_compra == "Escolher um aparelho":
+                if not edit_equipamento_unico:
+                    st.warning("Escolha um aparelho.")
+                    return
+
+                novo_equipamento_id = edit_equipamento_unico["id"]
+                nova_capacidade = edit_equipamento_unico["capacidade"]
+
+                novos_itens.append(
+                    montar_item(
+                        edit_equipamento_unico["descricao"],
+                        1,
+                        "equipamento",
+                        edit_equipamento_unico["preco"],
+                        origem="equipamento",
+                    )
+                )
+
+                for nome_servico in edit_servicos:
+                    dados_servico = config.get("servicos", {}).get(
+                        nome_servico,
+                        {},
+                    )
+                    valor = float(
+                        dados_servico.get("precos", {}).get(
+                            nova_capacidade,
+                            precos_servicos_atuais.get(
+                                nome_servico,
+                                0,
+                            ),
                         )
+                        or 0
                     )
 
-                    try:
-                        salvar_orcamento_editado(
-                            orcamentos,
-                            orcamento,
-                        )
-                        st.success("Material adicionado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Não foi possível salvar: {e}")
-
-    # -----------------------------------------------------
-    # ADICIONAR SERVIÇO
-    # -----------------------------------------------------
-    with st.expander("Adicionar serviço"):
-        servicos_ativos = {
-            nome: dados
-            for nome, dados in config.get("servicos", {}).items()
-            if dados.get("ativo", True)
-            and dados.get("mostrar_cliente", True)
-        }
-
-        if not servicos_ativos:
-            st.caption("Nenhum serviço ativo está cadastrado.")
-        else:
-            nome_servico = st.selectbox(
-                "Serviço",
-                list(servicos_ativos.keys()),
-                key=f"cliente_edit_servico_{orcamento.get('numero')}",
-            )
-
-            if opcoes:
-                st.caption(
-                    "Em orçamento comparativo, o serviço será aplicado a todas "
-                    "as opções usando o preço correspondente aos BTUs de cada aparelho."
-                )
-
-                if st.button(
-                    "Adicionar serviço às opções",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"cliente_add_servico_opcoes_{orcamento.get('numero')}",
-                ):
-                    for opcao in orcamento.get("opcoes_equipamentos", []):
-                        cap = opcao.get("capacidade")
-                        valor = float(
-                            servicos_ativos[nome_servico]
-                            .get("precos", {})
-                            .get(cap, 0)
-                            or 0
-                        )
-                        descricao = f"{nome_servico} • {cap}"
-
-                        ja_existe = any(
-                            s.get("descricao") == descricao
-                            for s in opcao.get("servicos", [])
-                        )
-
-                        if not ja_existe:
-                            opcao.setdefault("servicos", []).append(
-                                {
-                                    "descricao": descricao,
-                                    "valor": valor,
-                                }
-                            )
-
-                    try:
-                        salvar_orcamento_editado(
-                            orcamentos,
-                            orcamento,
-                        )
-                        st.success("Serviço adicionado às opções.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Não foi possível salvar: {e}")
-
-            else:
-                capacidade_salva = orcamento.get("capacidade")
-                default_idx = (
-                    CAPACIDADES.index(capacidade_salva)
-                    if capacidade_salva in CAPACIDADES
-                    else 0
-                )
-                capacidade_servico = st.selectbox(
-                    "Capacidade para o serviço",
-                    CAPACIDADES,
-                    index=default_idx,
-                    key=f"cliente_edit_servico_cap_{orcamento.get('numero')}",
-                )
-
-                preco_servico = float(
-                    servicos_ativos[nome_servico]
-                    .get("precos", {})
-                    .get(capacidade_servico, 0)
-                    or 0
-                )
-
-                st.caption(
-                    f"Preço cadastrado: {dinheiro(preco_servico)}"
-                )
-
-                if st.button(
-                    "Adicionar serviço ao orçamento",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"cliente_add_servico_{orcamento.get('numero')}",
-                ):
-                    descricao = f"{nome_servico} • {capacidade_servico}"
-
-                    orcamento.setdefault("itens", []).append(
+                    novos_itens.append(
                         montar_item(
-                            descricao,
+                            f"{nome_servico} • {nova_capacidade}",
                             1,
                             "serviço",
-                            preco_servico,
+                            valor,
                             origem="servico",
                         )
                     )
 
-                    try:
-                        salvar_orcamento_editado(
-                            orcamentos,
-                            orcamento,
+            else:
+                if not edit_opcoes_comparacao:
+                    st.warning("Selecione pelo menos um aparelho para comparar.")
+                    return
+
+                capacidades_escolhidas = []
+
+                for eq in edit_opcoes_comparacao:
+                    cap_eq = eq.get("capacidade")
+                    if cap_eq and cap_eq not in capacidades_escolhidas:
+                        capacidades_escolhidas.append(cap_eq)
+
+                    servicos_eq = []
+
+                    for nome_servico in edit_servicos:
+                        dados_servico = config.get("servicos", {}).get(
+                            nome_servico,
+                            {},
                         )
-                        st.success("Serviço adicionado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Não foi possível salvar: {e}")
+                        valor = float(
+                            dados_servico.get("precos", {}).get(
+                                cap_eq,
+                                precos_servicos_atuais.get(
+                                    nome_servico,
+                                    0,
+                                ),
+                            )
+                            or 0
+                        )
+
+                        servicos_eq.append(
+                            {
+                                "descricao": f"{nome_servico} • {cap_eq}",
+                                "valor": valor,
+                            }
+                        )
+
+                    nova_opcao = copy.deepcopy(eq)
+                    nova_opcao["servicos"] = servicos_eq
+                    nova_opcao["total_servicos"] = sum(
+                        float(s.get("valor", 0) or 0)
+                        for s in servicos_eq
+                    )
+                    novas_opcoes.append(nova_opcao)
+
+                nova_capacidade = (
+                    capacidades_escolhidas[0]
+                    if len(capacidades_escolhidas) == 1
+                    else "Várias capacidades"
+                )
+
+        # Já possui / avaliando
+        else:
+            cap_servico = (
+                edit_capacidade
+                if edit_capacidade in CAPACIDADES
+                else None
+            )
+
+            nova_capacidade = edit_capacidade
+
+            for nome_servico in edit_servicos:
+                dados_servico = config.get("servicos", {}).get(
+                    nome_servico,
+                    {},
+                )
+
+                if cap_servico:
+                    valor = float(
+                        dados_servico.get("precos", {}).get(
+                            cap_servico,
+                            precos_servicos_atuais.get(
+                                nome_servico,
+                                0,
+                            ),
+                        )
+                        or 0
+                    )
+                    descricao = f"{nome_servico} • {cap_servico}"
+                else:
+                    valor = 0.0
+                    descricao = f"{nome_servico} • capacidade a confirmar"
+
+                novos_itens.append(
+                    montar_item(
+                        descricao,
+                        1,
+                        "serviço",
+                        valor,
+                        origem="servico",
+                    )
+                )
+
+        orcamento["cliente"] = {
+            "nome": edit_nome.strip(),
+            "telefone": edit_telefone.strip(),
+            "cidade": edit_cidade.strip(),
+        }
+        orcamento["possui_aparelho"] = edit_possui
+        orcamento["modo_compra"] = (
+            edit_modo_compra
+            if edit_possui == "Não, quero comprar"
+            else None
+        )
+        orcamento["capacidade"] = nova_capacidade
+        orcamento["equipamento_id"] = novo_equipamento_id
+        orcamento["opcoes_equipamentos"] = novas_opcoes
+        orcamento["itens"] = novos_itens
+        orcamento["tipo_imovel"] = edit_tipo_imovel
+        orcamento["andar"] = (
+            int(edit_andar)
+            if edit_tipo_imovel == "Apartamento"
+            else None
+        )
+        orcamento["area_ambiente"] = edit_area
+        orcamento["adicional"] = {
+            "solicitado": edit_adicional == "Sim",
+            "descricao": edit_adicional_desc.strip(),
+        }
+        orcamento["observacoes"] = edit_observacoes.strip()
+
+        try:
+            salvar_orcamento_editado(
+                orcamentos,
+                orcamento,
+            )
+            st.success("Orçamento atualizado com sucesso.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível salvar: {e}")
+            return
 
     # -----------------------------------------------------
-    # PDF ATUALIZADO
+    # PDF ATUALIZADO / FECHAR
     # -----------------------------------------------------
-    st.divider()
-    st.caption(
-        "Os valores unitários usados acima vêm dos cadastros do sistema "
-        "e não podem ser alterados nesta área."
-    )
 
     pdf_atualizado = gerar_pdf(orcamento)
     compartilhar_pdf(
         pdf_atualizado,
-        f'orcamento_{orcamento.get("numero")}_F_Climatizacao.pdf',
-        titulo=f'Orçamento {orcamento.get("numero")} - F Climatização',
+        f'orcamento_{numero}_F_Climatizacao.pdf',
+        titulo=f'Orçamento {numero} - F Climatização',
     )
 
     if st.button(
         "Fechar edição",
         use_container_width=True,
-        key="fechar_edicao_cliente",
+        key=f"fechar_edicao_cliente_{numero}",
     ):
         st.session_state.pop("orcamento_cliente_em_edicao", None)
+
+        for chave in list(st.session_state.keys()):
+            if str(chave).startswith(f"edit_eq_chk_{numero}_"):
+                st.session_state.pop(chave, None)
+
+        st.session_state.pop(f"edit_eq_ids_{numero}", None)
         st.rerun()
 
-
-# =========================================================
-# CLIENTE
-# =========================================================
 
 def pagina_cliente():
     restaurar_rascunho_cliente()
