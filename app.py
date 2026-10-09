@@ -12,6 +12,7 @@ import os
 import copy
 import uuid
 import time
+import hashlib
 from contextlib import contextmanager
 
 try:
@@ -1005,6 +1006,88 @@ def salvar_financeiro(dados):
     )
 
 
+
+def assinatura_dados(dados):
+    try:
+        bruto = json.dumps(
+            dados,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except Exception:
+        bruto = repr(dados)
+    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()
+
+
+def autosalvar_config_admin(chave="config_admin"):
+    """
+    Salva automaticamente alterações do ADM quando o conteúdo realmente muda.
+    A primeira renderização apenas registra a assinatura atual.
+    """
+    assinatura = assinatura_dados(config)
+    chave_estado = f"_autosave_sig_{chave}"
+    anterior = st.session_state.get(chave_estado)
+
+    if anterior is None:
+        st.session_state[chave_estado] = assinatura
+        return False
+
+    if anterior != assinatura:
+        salvar_config()
+        st.session_state[chave_estado] = assinatura
+        st.session_state["_autosave_ultima_config"] = datetime.now(
+            FUSO_BRASILIA
+        ).strftime("%d/%m/%Y %H:%M:%S")
+        return True
+
+    return False
+
+
+def autosalvar_financeiro_admin(financeiro, chave):
+    """
+    Salva custos privados automaticamente e recalcula a Central para que
+    custos/lucros dos pedidos e faturados usem os valores novos.
+    """
+    somente_custos = {
+        "custos_materiais": financeiro.get("custos_materiais", {}),
+        "custos_equipamentos": financeiro.get("custos_equipamentos", {}),
+    }
+
+    assinatura = assinatura_dados(somente_custos)
+    chave_estado = f"_autosave_fin_sig_{chave}"
+    anterior = st.session_state.get(chave_estado)
+
+    if anterior is None:
+        st.session_state[chave_estado] = assinatura
+        return False
+
+    if anterior != assinatura:
+        salvar_financeiro(financeiro)
+
+        # Recalcula faturados imediatamente com os novos custos.
+        try:
+            orcamentos_atualizados = carregar_orcamentos()
+            financeiro_atualizado = carregar_financeiro()
+            sincronizar_central_faturamento(
+                orcamentos_atualizados,
+                financeiro_atualizado,
+            )
+        except Exception:
+            # O custo já foi salvo; se a sincronização falhar, o botão
+            # "Atualizar dados da central" continua disponível como fallback.
+            pass
+
+        st.session_state[chave_estado] = assinatura
+        st.session_state["_autosave_ultima_financeiro"] = datetime.now(
+            FUSO_BRASILIA
+        ).strftime("%d/%m/%Y %H:%M:%S")
+        return True
+
+    return False
+
+
+
 def custo_material(financeiro, nome):
     return float(
         financeiro.get("custos_materiais", {})
@@ -1014,13 +1097,32 @@ def custo_material(financeiro, nome):
     )
 
 
-def custo_equipamento(financeiro, equipamento_id):
-    return float(
-        financeiro.get("custos_equipamentos", {})
-        .get(str(equipamento_id), {})
-        .get("custo", 0)
-        or 0
-    )
+def custo_equipamento(financeiro, equipamento_id, descricao=None):
+    custos = financeiro.get("custos_equipamentos", {})
+
+    if equipamento_id is not None:
+        direto = custos.get(str(equipamento_id), {})
+        if direto:
+            return float(direto.get("custo", 0) or 0)
+
+    # Fallback para orçamentos antigos nos quais o ID do equipamento
+    # não ficou gravado corretamente. Tenta localizar pelo texto do aparelho.
+    texto = str(descricao or "").lower()
+    texto = texto.replace(
+        "• instalação inclusa até 2 m de linha",
+        "",
+    ).strip()
+
+    if texto:
+        for eid, eq in config.get("equipamentos", {}).items():
+            nome = nome_equipamento(eq).lower().strip()
+            if nome and (nome in texto or texto in nome):
+                return float(
+                    custos.get(str(eid), {}).get("custo", 0)
+                    or 0
+                )
+
+    return 0.0
 
 
 def total_item_liquido_financeiro(item):
@@ -1054,6 +1156,7 @@ def estimar_resultado_pedido(orcamento, financeiro):
             custo_unit = custo_equipamento(
                 financeiro,
                 orcamento.get("equipamento_id"),
+                item.get("descricao", ""),
             )
 
         receita += venda
@@ -1072,6 +1175,7 @@ def estimar_resultado_pedido(orcamento, financeiro):
         custo += custo_equipamento(
             financeiro,
             opcao.get("id"),
+            opcao.get("descricao", ""),
         )
 
         for servico in opcao.get("servicos", []):
@@ -1126,6 +1230,7 @@ def snapshot_faturamento(orcamento, financeiro, pagamento=None):
             custo_unit = custo_equipamento(
                 financeiro,
                 orcamento.get("equipamento_id"),
+                item.get("descricao", ""),
             )
 
         custo_total = qtd * custo_unit
@@ -1154,6 +1259,7 @@ def snapshot_faturamento(orcamento, financeiro, pagamento=None):
         custo_eq = custo_equipamento(
             financeiro,
             opcao.get("id"),
+            opcao.get("descricao", ""),
         )
 
         linhas.append(
@@ -3383,20 +3489,30 @@ def aba_orcamentos():
                     dinheiro(total_orcamento(preview)),
                 )
 
-            csave, cpdf = st.columns(2)
+            # -------------------------------------------------
+            # SALVAMENTO AUTOMÁTICO DO ORÇAMENTO
+            # -------------------------------------------------
+            itens_finais_auto = itens_editados[:]
+            if adicionar_novo and item_para_adicionar:
+                itens_finais_auto.append(item_para_adicionar)
 
-            with csave:
-                if st.button(
-                    "Salvar orçamento",
-                    type="primary",
-                    key=f"adm_salvar_orc_{numero}",
-                ):
-                    itens_finais = itens_editados[:]
+            estado_auto = {
+                "itens": itens_finais_auto,
+                "opcoes_equipamentos": (
+                    opcoes_editadas if opcoes else []
+                ),
+                "desconto_percentual": float(desconto_geral),
+            }
 
-                    if adicionar_novo and item_para_adicionar:
-                        itens_finais.append(item_para_adicionar)
+            sig_auto = assinatura_dados(estado_auto)
+            chave_sig_auto = f"_autosave_orc_{numero}"
+            sig_anterior = st.session_state.get(chave_sig_auto)
 
-                    # Se o item foi criado aqui, grava também no catálogo correto.
+            if sig_anterior is None:
+                st.session_state[chave_sig_auto] = sig_auto
+
+            elif sig_anterior != sig_auto:
+                try:
                     if adicionar_novo and novo_catalogo:
                         nome_catalogo = novo_catalogo["nome"]
                         tipo_catalogo = novo_catalogo["tipo"]
@@ -3405,13 +3521,14 @@ def aba_orcamentos():
                             config.setdefault("materiais", {})[
                                 nome_catalogo
                             ] = novo_catalogo["dados"]
-
                         elif tipo_catalogo == "servico":
                             config.setdefault("servicos", {})[
                                 nome_catalogo
                             ] = novo_catalogo["dados"]
 
-                    o["itens"] = itens_finais
+                        salvar_config()
+
+                    o["itens"] = itens_finais_auto
                     o["opcoes_equipamentos"] = (
                         opcoes_editadas if opcoes else []
                     )
@@ -3420,22 +3537,30 @@ def aba_orcamentos():
                         FUSO_BRASILIA
                     ).strftime("%d/%m/%Y %H:%M")
 
-                    try:
-                        if adicionar_novo and novo_catalogo:
-                            salvar_config()
+                    salvar_orcamentos(orcamentos)
 
-                        salvar_orcamentos(orcamentos)
+                    # Se já está faturado, refaz a central com os valores novos.
+                    if o.get("status") == "Faturado / Concluído":
+                        fin_auto = carregar_financeiro()
+                        sincronizar_central_faturamento(
+                            orcamentos,
+                            fin_auto,
+                        )
 
-                        if adicionar_novo and novo_catalogo:
-                            st.success(
-                                "Orçamento atualizado e novo item salvo no catálogo."
-                            )
-                        else:
-                            st.success("Orçamento atualizado.")
+                    st.session_state[chave_sig_auto] = sig_auto
+                    st.caption("✓ Alterações deste registro salvas automaticamente.")
+                except Exception as e:
+                    st.error(f"Erro no salvamento automático: {e}")
+            else:
+                st.caption("✓ Salvamento automático deste registro ativo.")
 
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao salvar orçamento: {e}")
+            csave, cpdf = st.columns(2)
+
+            with csave:
+                st.caption(
+                    "Não é necessário salvar manualmente. "
+                    "Alterações de itens, preços e descontos são gravadas automaticamente."
+                )
 
             with cpdf:
                 pdf_bytes = gerar_pdf(preview)
@@ -3709,12 +3834,20 @@ def aba_materiais():
 
         with c2:
             novo_preco = st.number_input(
-                "Preço",
+                "Preço de venda",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
                 key="novo_mat_preco",
             )
+
+        novo_custo = st.number_input(
+            "Custo de aquisição (privado)",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            key="novo_mat_custo",
+        )
 
         if st.button("Adicionar ao catálogo", key="add_mat"):
             nome_limpo = novo_nome.strip()
@@ -3735,7 +3868,7 @@ def aba_materiais():
                     financeiro.setdefault("custos_materiais", {})[
                         nome_limpo
                     ] = {
-                        "custo": 0.0,
+                        "custo": float(novo_custo),
                     }
                     salvar_financeiro(financeiro)
                     st.success("Material criado e salvo.")
@@ -3743,16 +3876,19 @@ def aba_materiais():
                 except Exception as e:
                     st.error(f"Erro ao salvar material: {e}")
 
-    if st.button(
-        "Salvar custos privados dos materiais",
-        use_container_width=True,
-        key="salvar_custos_materiais",
-    ):
-        try:
-            salvar_financeiro(financeiro)
-            st.success("Custos privados dos materiais salvos.")
-        except Exception as e:
-            st.error(f"Erro ao salvar custos: {e}")
+    try:
+        salvou_fin_mat = autosalvar_financeiro_admin(
+            financeiro,
+            "materiais",
+        )
+        if salvou_fin_mat:
+            st.caption(
+                "✓ Custos dos materiais salvos automaticamente e Central recalculada."
+            )
+        else:
+            st.caption("✓ Custos privados: salvamento automático ativo.")
+    except Exception as e:
+        st.error(f"Erro no salvamento automático dos custos: {e}")
 
 
 # =========================================================
@@ -3860,11 +3996,18 @@ def aba_aparelhos():
     cap = st.selectbox("Capacidade do novo aparelho", CAPACIDADES, key="novo_eq_cap")
     tipo = st.selectbox("Tipo do novo aparelho", TIPOS_AR, key="novo_eq_tipo")
     preco = st.number_input(
-        "Preço estimado do novo aparelho",
+        "Preço de venda do novo aparelho",
         min_value=0.0,
         value=0.0,
         step=50.0,
         key="novo_eq_preco",
+    )
+    custo_novo_eq = st.number_input(
+        "Custo de aquisição do novo aparelho (privado)",
+        min_value=0.0,
+        value=0.0,
+        step=50.0,
+        key="novo_eq_custo",
     )
     ativo = st.checkbox("Disponível para o cliente", value=True, key="novo_eq_ativo")
 
@@ -3886,7 +4029,7 @@ def aba_aparelhos():
                 financeiro.setdefault("custos_equipamentos", {})[
                     eid
                 ] = {
-                    "custo": 0.0,
+                    "custo": float(custo_novo_eq),
                 }
                 salvar_financeiro(financeiro)
                 st.success("Aparelho criado e salvo.")
@@ -3894,16 +4037,19 @@ def aba_aparelhos():
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
 
-    if st.button(
-        "Salvar custos privados dos aparelhos",
-        use_container_width=True,
-        key="salvar_custos_aparelhos",
-    ):
-        try:
-            salvar_financeiro(financeiro)
-            st.success("Custos privados dos aparelhos salvos.")
-        except Exception as e:
-            st.error(f"Erro ao salvar custos: {e}")
+    try:
+        salvou_fin_eq = autosalvar_financeiro_admin(
+            financeiro,
+            "aparelhos",
+        )
+        if salvou_fin_eq:
+            st.caption(
+                "✓ Custos dos aparelhos salvos automaticamente e Central recalculada."
+            )
+        else:
+            st.caption("✓ Custos privados: salvamento automático ativo.")
+    except Exception as e:
+        st.error(f"Erro no salvamento automático dos custos: {e}")
 
 
 # =========================================================
@@ -3981,8 +4127,9 @@ def pagina_central_faturamento():
           <div class="finance-kicker">Gestão financeira</div>
           <div class="finance-title">Central de Faturamento</div>
           <div class="finance-sub">
-            Acompanhe vendas concluídas, custos, lucro, formas de pagamento
-            e desempenho por período.
+            Acompanhe vendas concluídas, custos de aquisição, lucro, formas de pagamento
+            e desempenho por período. Custos alterados em Materiais e Aparelhos
+            passam a recalcular os resultados da Central.
           </div>
         </div>
         """,
@@ -4568,12 +4715,14 @@ def pagina_admin():
 
     st.divider()
 
-    if st.button("Salvar alterações do sistema", type="primary", use_container_width=True):
-        try:
-            salvar_config()
-            st.success("Configurações salvas permanentemente.")
-        except Exception as e:
-            st.error(f"Erro ao salvar configurações: {e}")
+    try:
+        salvou_config_auto = autosalvar_config_admin("painel")
+        if salvou_config_auto:
+            st.caption("✓ Alterações do painel salvas automaticamente.")
+        else:
+            st.caption("✓ Salvamento automático do painel ativo.")
+    except Exception as e:
+        st.error(f"Erro no salvamento automático do painel: {e}")
 
     if st.button("Sair do administrador", use_container_width=True):
         st.session_state["admin_logado"] = False
