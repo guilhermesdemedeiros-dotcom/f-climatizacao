@@ -1599,7 +1599,6 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
     <script>
       const b64 = "{pdf_b64}";
       const fileName = {json.dumps(nome_arquivo)};
-      const shareTitle = {json.dumps(titulo)};
 
       function base64ToBlob(base64, type) {{
         const binary = atob(base64);
@@ -1628,8 +1627,6 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
             navigator.canShare({{ files: [file] }})
           ) {{
             await navigator.share({{
-              title: shareTitle,
-              text: "Orçamento em PDF da F Climatização",
               files: [file]
             }});
           }} else {{
