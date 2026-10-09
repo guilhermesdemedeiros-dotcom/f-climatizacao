@@ -462,6 +462,7 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_equipamento_unico",
     "cliente_capacidade",
     "cliente_servicos",
+    "cliente_materiais",
     "cliente_tipo_imovel",
     "cliente_andar",
     "cliente_area",
@@ -540,6 +541,7 @@ def restaurar_rascunho_cliente():
         if (
             campo in CLIENT_DRAFT_FIELDS
             or str(campo).startswith("cliente_eq_visivel_")
+            or str(campo).startswith("cliente_mat_qtd_")
         ) and campo not in st.session_state:
             st.session_state[campo] = valor
             alterou = True
@@ -569,8 +571,11 @@ def salvar_rascunho_cliente():
 
     # Também preserva as seleções individuais de aparelhos.
     for campo, valor in st.session_state.items():
-        if str(campo).startswith("cliente_eq_visivel_"):
+        nome_campo = str(campo)
+        if nome_campo.startswith("cliente_eq_visivel_"):
             dados[campo] = bool(valor)
+        elif nome_campo.startswith("cliente_mat_qtd_"):
+            dados[campo] = valor
 
     if not dados:
         return
@@ -617,7 +622,8 @@ def limpar_rascunho_cliente():
         st.session_state.pop(campo, None)
 
     for campo in list(st.session_state.keys()):
-        if str(campo).startswith("cliente_eq_visivel_"):
+        nome_campo = str(campo)
+        if nome_campo.startswith("cliente_eq_visivel_") or nome_campo.startswith("cliente_mat_qtd_"):
             st.session_state.pop(campo, None)
 
     st.session_state.pop("cliente_equipamentos_selecionados", None)
@@ -781,7 +787,7 @@ def cabecalho(admin=False):
         <div>
           <div class="brand-admin">ADMINISTRAÇÃO</div>
           <div class="brand-name">F CLIMATIZAÇÃO</div>
-          <div class="brand-sub">Painel de gestão, preços e orçamentos</div>
+          <div class="brand-sub">Painel de gestão de cadastros e preços</div>
         </div>
         """
     else:
@@ -2210,19 +2216,17 @@ def pagina_admin():
                 st.error("Senha incorreta.")
         return
 
-    tabs = st.tabs(["Orçamentos", "Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
+    tabs = st.tabs(["Serviços", "Materiais", "Aparelhos", "Regras", "Empresa"])
 
     with tabs[0]:
-        aba_orcamentos()
-    with tabs[1]:
         aba_servicos()
-    with tabs[2]:
+    with tabs[1]:
         aba_materiais()
-    with tabs[3]:
+    with tabs[2]:
         aba_aparelhos()
-    with tabs[4]:
+    with tabs[3]:
         aba_regras()
-    with tabs[5]:
+    with tabs[4]:
         aba_empresa()
 
     st.divider()
@@ -2241,6 +2245,490 @@ def pagina_admin():
         st.rerun()
 
 
+
+def somente_digitos(valor):
+    return "".join(c for c in str(valor or "") if c.isdigit())
+
+
+def atualizar_totais_opcoes(orcamento):
+    for opcao in orcamento.get("opcoes_equipamentos", []):
+        opcao["total_servicos"] = sum(
+            float(servico.get("valor", 0) or 0)
+            for servico in opcao.get("servicos", [])
+        )
+
+
+def salvar_orcamento_editado(orcamentos, orcamento):
+    orcamento["atualizado_em"] = datetime.now(FUSO_BRASILIA).strftime(
+        "%d/%m/%Y %H:%M"
+    )
+    atualizar_totais_opcoes(orcamento)
+
+    for idx, item in enumerate(orcamentos):
+        if str(item.get("numero", "")) == str(orcamento.get("numero", "")):
+            orcamentos[idx] = orcamento
+            break
+
+    salvar_orcamentos(orcamentos)
+
+
+def localizar_orcamento_cliente(orcamentos, numero, telefone):
+    numero_limpo = str(numero or "").strip().lstrip("#").strip()
+    numero_normalizado = numero_limpo.zfill(4) if numero_limpo.isdigit() else numero_limpo
+    telefone_limpo = somente_digitos(telefone)
+
+    for orcamento in orcamentos:
+        if str(orcamento.get("numero", "")).zfill(4) != numero_normalizado:
+            continue
+
+        telefone_salvo = somente_digitos(
+            orcamento.get("cliente", {}).get("telefone", "")
+        )
+
+        if telefone_limpo and telefone_salvo == telefone_limpo:
+            return orcamento
+
+    return None
+
+
+def editor_orcamento_cliente():
+    secao(
+        "Editar orçamento",
+        "Localize um orçamento já criado para adicionar ou remover itens.",
+    )
+
+    st.markdown(
+        """
+        <div class="info-card">
+          <div class="card-title">Edição do orçamento</div>
+          <div class="card-text">
+            Aqui você altera apenas os itens deste orçamento.
+            Preços e cadastros principais continuam protegidos no ADM.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        numero_busca = st.text_input(
+            "Número do orçamento",
+            placeholder="Ex.: 0012",
+            key="editar_busca_numero",
+        )
+    with c2:
+        telefone_busca = st.text_input(
+            "Telefone do cliente",
+            placeholder="Mesmo telefone usado no orçamento",
+            key="editar_busca_telefone",
+        )
+
+    if st.button(
+        "LOCALIZAR ORÇAMENTO",
+        type="primary",
+        use_container_width=True,
+        key="btn_localizar_orcamento_cliente",
+    ):
+        if not numero_busca.strip() or not somente_digitos(telefone_busca):
+            st.warning("Informe o número do orçamento e o telefone usado nele.")
+        else:
+            orcamentos = carregar_orcamentos()
+            encontrado = localizar_orcamento_cliente(
+                orcamentos,
+                numero_busca,
+                telefone_busca,
+            )
+
+            if encontrado:
+                st.session_state["orcamento_cliente_em_edicao"] = encontrado.get("numero")
+                st.session_state["orcamento_cliente_telefone"] = somente_digitos(
+                    telefone_busca
+                )
+                st.rerun()
+            else:
+                st.error("Orçamento não localizado. Confira o número e o telefone.")
+
+    numero_edicao = st.session_state.get("orcamento_cliente_em_edicao")
+    telefone_edicao = st.session_state.get("orcamento_cliente_telefone")
+
+    if not numero_edicao or not telefone_edicao:
+        return
+
+    orcamentos = carregar_orcamentos()
+    orcamento = localizar_orcamento_cliente(
+        orcamentos,
+        numero_edicao,
+        telefone_edicao,
+    )
+
+    if not orcamento:
+        st.session_state.pop("orcamento_cliente_em_edicao", None)
+        st.session_state.pop("orcamento_cliente_telefone", None)
+        st.warning("Esse orçamento não está mais disponível para edição.")
+        return
+
+    cliente = orcamento.get("cliente", {})
+    total_itens = calcular_total(orcamento.get("itens", []))
+    opcoes = orcamento.get("opcoes_equipamentos", [])
+
+    st.divider()
+    st.markdown(
+        f'<span class="budget-number">#{orcamento.get("numero","")}</span>',
+        unsafe_allow_html=True,
+    )
+    st.write(f'**Cliente:** {cliente.get("nome","")}')
+    st.caption(
+        f'{orcamento.get("data","")} • {cliente.get("cidade","")} • '
+        f'{cliente.get("telefone","")}'
+    )
+
+    if opcoes:
+        st.caption(
+            f"Orçamento comparativo com {len(opcoes)} opção(ões) de aparelho."
+        )
+        if total_itens > 0:
+            st.metric("Itens comuns", dinheiro(total_itens))
+    else:
+        st.metric("Total atual", dinheiro(total_itens))
+
+    # -----------------------------------------------------
+    # REMOVER ITENS ATUAIS
+    # -----------------------------------------------------
+    with st.expander("Itens atuais / remover"):
+        itens = orcamento.get("itens", [])
+
+        if not itens:
+            st.caption("Nenhum item comum neste orçamento.")
+        else:
+            ids_remover = []
+
+            for idx, item in enumerate(itens):
+                iid = item.get("id") or f"item_{idx}"
+                qtd = float(item.get("quantidade", 0) or 0)
+                vu = float(item.get("valor_unitario", 0) or 0)
+                label = (
+                    f'{item.get("descricao","Item")} — '
+                    f'{qtd:g} {item.get("unidade","")} — {dinheiro(qtd * vu)}'
+                )
+
+                if st.checkbox(
+                    label,
+                    key=f"cliente_remover_item_{orcamento.get('numero')}_{iid}",
+                ):
+                    ids_remover.append(iid)
+
+            if ids_remover and st.button(
+                "Remover itens selecionados",
+                use_container_width=True,
+                key=f"cliente_btn_remover_itens_{orcamento.get('numero')}",
+            ):
+                novos = []
+
+                for idx, item in enumerate(itens):
+                    iid = item.get("id") or f"item_{idx}"
+                    if iid not in ids_remover:
+                        novos.append(item)
+
+                orcamento["itens"] = novos
+
+                try:
+                    salvar_orcamento_editado(
+                        orcamentos,
+                        orcamento,
+                    )
+                    st.success("Itens removidos.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível salvar: {e}")
+
+    # -----------------------------------------------------
+    # OPÇÕES DE APARELHOS EM ORÇAMENTO COMPARATIVO
+    # -----------------------------------------------------
+    if opcoes:
+        with st.expander("Opções de aparelhos / serviços"):
+            opcoes_remover = []
+            servicos_remover = {}
+
+            for opcao in opcoes:
+                oid = str(opcao.get("id", ""))
+                st.markdown(
+                    f'**{opcao.get("descricao","Aparelho")}** — '
+                    f'{dinheiro(opcao.get("preco",0))}'
+                )
+
+                if st.checkbox(
+                    "Remover esta opção do orçamento",
+                    key=f"cliente_remover_opcao_{orcamento.get('numero')}_{oid}",
+                ):
+                    opcoes_remover.append(oid)
+
+                servicos_opcao = opcao.get("servicos", [])
+                if servicos_opcao:
+                    remover_indices = []
+
+                    for sidx, servico in enumerate(servicos_opcao):
+                        if st.checkbox(
+                            f'Remover {servico.get("descricao","Serviço")} — '
+                            f'{dinheiro(servico.get("valor",0))}',
+                            key=(
+                                f"cliente_remover_servico_opcao_"
+                                f"{orcamento.get('numero')}_{oid}_{sidx}"
+                            ),
+                        ):
+                            remover_indices.append(sidx)
+
+                    if remover_indices:
+                        servicos_remover[oid] = remover_indices
+
+                st.divider()
+
+            if (opcoes_remover or servicos_remover) and st.button(
+                "Aplicar remoções das opções",
+                use_container_width=True,
+                key=f"cliente_btn_remover_opcoes_{orcamento.get('numero')}",
+            ):
+                novas_opcoes = []
+
+                for opcao in orcamento.get("opcoes_equipamentos", []):
+                    oid = str(opcao.get("id", ""))
+
+                    if oid in opcoes_remover:
+                        continue
+
+                    if oid in servicos_remover:
+                        opcao["servicos"] = [
+                            servico
+                            for idx, servico in enumerate(
+                                opcao.get("servicos", [])
+                            )
+                            if idx not in servicos_remover[oid]
+                        ]
+
+                    novas_opcoes.append(opcao)
+
+                orcamento["opcoes_equipamentos"] = novas_opcoes
+
+                try:
+                    salvar_orcamento_editado(
+                        orcamentos,
+                        orcamento,
+                    )
+                    st.success("Alterações aplicadas.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não foi possível salvar: {e}")
+
+    # -----------------------------------------------------
+    # ADICIONAR MATERIAL
+    # -----------------------------------------------------
+    with st.expander("Adicionar material"):
+        materiais_ativos = {
+            nome: dados
+            for nome, dados in config.get("materiais", {}).items()
+            if dados.get("ativo", True)
+        }
+
+        if not materiais_ativos:
+            st.caption("Nenhum material ativo está cadastrado.")
+        else:
+            nomes_materiais = list(materiais_ativos.keys())
+            material_nome = st.selectbox(
+                "Material",
+                nomes_materiais,
+                key=f"cliente_edit_material_{orcamento.get('numero')}",
+            )
+            dados_material = materiais_ativos[material_nome]
+            unidade_material = dados_material.get("unidade", "unidade")
+            preco_material = float(dados_material.get("preco", 0) or 0)
+
+            quantidade_material = st.number_input(
+                f"Quantidade ({unidade_material})",
+                min_value=0.0,
+                value=1.0,
+                step=0.5 if unidade_material == "metro" else 1.0,
+                key=f"cliente_edit_material_qtd_{orcamento.get('numero')}",
+            )
+
+            st.caption(
+                f"Preço cadastrado: {dinheiro(preco_material)} / "
+                f"{unidade_material} • Total: "
+                f"{dinheiro(quantidade_material * preco_material)}"
+            )
+
+            if st.button(
+                "Adicionar material ao orçamento",
+                type="primary",
+                use_container_width=True,
+                key=f"cliente_add_material_{orcamento.get('numero')}",
+            ):
+                if quantidade_material <= 0:
+                    st.warning("Informe uma quantidade maior que zero.")
+                else:
+                    orcamento.setdefault("itens", []).append(
+                        montar_item(
+                            material_nome,
+                            quantidade_material,
+                            unidade_material,
+                            preco_material,
+                            origem="material",
+                        )
+                    )
+
+                    try:
+                        salvar_orcamento_editado(
+                            orcamentos,
+                            orcamento,
+                        )
+                        st.success("Material adicionado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível salvar: {e}")
+
+    # -----------------------------------------------------
+    # ADICIONAR SERVIÇO
+    # -----------------------------------------------------
+    with st.expander("Adicionar serviço"):
+        servicos_ativos = {
+            nome: dados
+            for nome, dados in config.get("servicos", {}).items()
+            if dados.get("ativo", True)
+            and dados.get("mostrar_cliente", True)
+        }
+
+        if not servicos_ativos:
+            st.caption("Nenhum serviço ativo está cadastrado.")
+        else:
+            nome_servico = st.selectbox(
+                "Serviço",
+                list(servicos_ativos.keys()),
+                key=f"cliente_edit_servico_{orcamento.get('numero')}",
+            )
+
+            if opcoes:
+                st.caption(
+                    "Em orçamento comparativo, o serviço será aplicado a todas "
+                    "as opções usando o preço correspondente aos BTUs de cada aparelho."
+                )
+
+                if st.button(
+                    "Adicionar serviço às opções",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"cliente_add_servico_opcoes_{orcamento.get('numero')}",
+                ):
+                    for opcao in orcamento.get("opcoes_equipamentos", []):
+                        cap = opcao.get("capacidade")
+                        valor = float(
+                            servicos_ativos[nome_servico]
+                            .get("precos", {})
+                            .get(cap, 0)
+                            or 0
+                        )
+                        descricao = f"{nome_servico} • {cap}"
+
+                        ja_existe = any(
+                            s.get("descricao") == descricao
+                            for s in opcao.get("servicos", [])
+                        )
+
+                        if not ja_existe:
+                            opcao.setdefault("servicos", []).append(
+                                {
+                                    "descricao": descricao,
+                                    "valor": valor,
+                                }
+                            )
+
+                    try:
+                        salvar_orcamento_editado(
+                            orcamentos,
+                            orcamento,
+                        )
+                        st.success("Serviço adicionado às opções.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível salvar: {e}")
+
+            else:
+                capacidade_salva = orcamento.get("capacidade")
+                default_idx = (
+                    CAPACIDADES.index(capacidade_salva)
+                    if capacidade_salva in CAPACIDADES
+                    else 0
+                )
+                capacidade_servico = st.selectbox(
+                    "Capacidade para o serviço",
+                    CAPACIDADES,
+                    index=default_idx,
+                    key=f"cliente_edit_servico_cap_{orcamento.get('numero')}",
+                )
+
+                preco_servico = float(
+                    servicos_ativos[nome_servico]
+                    .get("precos", {})
+                    .get(capacidade_servico, 0)
+                    or 0
+                )
+
+                st.caption(
+                    f"Preço cadastrado: {dinheiro(preco_servico)}"
+                )
+
+                if st.button(
+                    "Adicionar serviço ao orçamento",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"cliente_add_servico_{orcamento.get('numero')}",
+                ):
+                    descricao = f"{nome_servico} • {capacidade_servico}"
+
+                    orcamento.setdefault("itens", []).append(
+                        montar_item(
+                            descricao,
+                            1,
+                            "serviço",
+                            preco_servico,
+                            origem="servico",
+                        )
+                    )
+
+                    try:
+                        salvar_orcamento_editado(
+                            orcamentos,
+                            orcamento,
+                        )
+                        st.success("Serviço adicionado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Não foi possível salvar: {e}")
+
+    # -----------------------------------------------------
+    # PDF ATUALIZADO
+    # -----------------------------------------------------
+    st.divider()
+    st.caption(
+        "Os valores unitários usados acima vêm dos cadastros do sistema "
+        "e não podem ser alterados nesta área."
+    )
+
+    pdf_atualizado = gerar_pdf(orcamento)
+    compartilhar_pdf(
+        pdf_atualizado,
+        f'orcamento_{orcamento.get("numero")}_F_Climatizacao.pdf',
+        titulo=f'Orçamento {orcamento.get("numero")} - F Climatização',
+    )
+
+    if st.button(
+        "Fechar edição",
+        use_container_width=True,
+        key="fechar_edicao_cliente",
+    ):
+        st.session_state.pop("orcamento_cliente_em_edicao", None)
+        st.session_state.pop("orcamento_cliente_telefone", None)
+        st.rerun()
+
+
 # =========================================================
 # CLIENTE
 # =========================================================
@@ -2252,6 +2740,17 @@ def pagina_cliente():
         st.info("Seu orçamento em andamento foi restaurado.")
 
     cabecalho(admin=False)
+
+    modo_area_cliente = st.radio(
+        "O que deseja fazer?",
+        ["Novo orçamento", "Editar orçamento existente"],
+        horizontal=True,
+        key="modo_area_cliente",
+    )
+
+    if modo_area_cliente == "Editar orçamento existente":
+        editor_orcamento_cliente()
+        return
 
     st.markdown(
         """
@@ -2550,6 +3049,61 @@ def pagina_cliente():
         key="cliente_servicos",
     )
 
+    materiais_selecionados = []
+
+    materiais_ativos_cliente = {
+        nome: dados
+        for nome, dados in config.get("materiais", {}).items()
+        if dados.get("ativo", True)
+    }
+
+    if materiais_ativos_cliente:
+        with st.expander("Adicionar materiais ao orçamento"):
+            nomes_materiais_cliente = list(materiais_ativos_cliente.keys())
+
+            garantir_opcao_valida(
+                "cliente_materiais",
+                nomes_materiais_cliente,
+                multiplo=True,
+            )
+
+            escolhidos_materiais = st.multiselect(
+                "Materiais",
+                nomes_materiais_cliente,
+                key="cliente_materiais",
+                placeholder="Selecione somente se necessário",
+            )
+
+            for nome_material in escolhidos_materiais:
+                dados_material = materiais_ativos_cliente[nome_material]
+                unidade_material = dados_material.get("unidade", "unidade")
+                preco_material = float(
+                    dados_material.get("preco", 0) or 0
+                )
+
+                quantidade = st.number_input(
+                    f"{nome_material} • quantidade ({unidade_material})",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.5 if unidade_material == "metro" else 1.0,
+                    key=f"cliente_mat_qtd_{nome_material}",
+                )
+
+                st.caption(
+                    f"{dinheiro(preco_material)} / {unidade_material} • "
+                    f"Total: {dinheiro(quantidade * preco_material)}"
+                )
+
+                if quantidade > 0:
+                    materiais_selecionados.append(
+                        {
+                            "nome": nome_material,
+                            "quantidade": float(quantidade),
+                            "unidade": unidade_material,
+                            "preco": preco_material,
+                        }
+                    )
+
     secao("Local do serviço", "Informações que ajudam a calcular a estimativa.")
 
     tipos_imovel = ["Casa", "Apartamento", "Comércio", "Outro"]
@@ -2801,6 +3355,19 @@ def pagina_cliente():
                         origem="regra",
                     )
                 )
+
+        # Materiais escolhidos no acesso normal usam sempre
+        # preço e unidade definidos no catálogo do ADM.
+        for material in materiais_selecionados:
+            itens.append(
+                montar_item(
+                    material["nome"],
+                    material["quantidade"],
+                    material["unidade"],
+                    material["preco"],
+                    origem="material",
+                )
+            )
 
         orcamentos = carregar_orcamentos()
         numero = proximo_numero(orcamentos)
