@@ -2272,20 +2272,16 @@ def salvar_orcamento_editado(orcamentos, orcamento):
     salvar_orcamentos(orcamentos)
 
 
-def localizar_orcamento_cliente(orcamentos, numero, telefone):
+def localizar_orcamento_cliente(orcamentos, numero):
     numero_limpo = str(numero or "").strip().lstrip("#").strip()
-    numero_normalizado = numero_limpo.zfill(4) if numero_limpo.isdigit() else numero_limpo
-    telefone_limpo = somente_digitos(telefone)
+
+    if not numero_limpo.isdigit():
+        return None
+
+    numero_normalizado = numero_limpo.zfill(4)
 
     for orcamento in orcamentos:
-        if str(orcamento.get("numero", "")).zfill(4) != numero_normalizado:
-            continue
-
-        telefone_salvo = somente_digitos(
-            orcamento.get("cliente", {}).get("telefone", "")
-        )
-
-        if telefone_limpo and telefone_salvo == telefone_limpo:
+        if str(orcamento.get("numero", "")).zfill(4) == numero_normalizado:
             return orcamento
 
     return None
@@ -2294,7 +2290,7 @@ def localizar_orcamento_cliente(orcamentos, numero, telefone):
 def editor_orcamento_cliente():
     secao(
         "Editar orçamento",
-        "Localize um orçamento já criado para adicionar ou remover itens.",
+        "Localize um orçamento já criado pelo número de 4 dígitos.",
     )
 
     st.markdown(
@@ -2310,19 +2306,12 @@ def editor_orcamento_cliente():
         unsafe_allow_html=True,
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        numero_busca = st.text_input(
-            "Número do orçamento",
-            placeholder="Ex.: 0012",
-            key="editar_busca_numero",
-        )
-    with c2:
-        telefone_busca = st.text_input(
-            "Telefone do cliente",
-            placeholder="Mesmo telefone usado no orçamento",
-            key="editar_busca_telefone",
-        )
+    numero_busca = st.text_input(
+        "Número do orçamento",
+        placeholder="Ex.: 0012",
+        max_chars=4,
+        key="editar_busca_numero",
+    )
 
     if st.button(
         "LOCALIZAR ORÇAMENTO",
@@ -2330,41 +2319,36 @@ def editor_orcamento_cliente():
         use_container_width=True,
         key="btn_localizar_orcamento_cliente",
     ):
-        if not numero_busca.strip() or not somente_digitos(telefone_busca):
-            st.warning("Informe o número do orçamento e o telefone usado nele.")
+        numero_limpo = str(numero_busca or "").strip()
+
+        if not numero_limpo.isdigit() or len(numero_limpo) != 4:
+            st.warning("Informe o número do orçamento com 4 dígitos. Ex.: 0012.")
         else:
             orcamentos = carregar_orcamentos()
             encontrado = localizar_orcamento_cliente(
                 orcamentos,
-                numero_busca,
-                telefone_busca,
+                numero_limpo,
             )
 
             if encontrado:
                 st.session_state["orcamento_cliente_em_edicao"] = encontrado.get("numero")
-                st.session_state["orcamento_cliente_telefone"] = somente_digitos(
-                    telefone_busca
-                )
                 st.rerun()
             else:
-                st.error("Orçamento não localizado. Confira o número e o telefone.")
+                st.error("Orçamento não localizado.")
 
     numero_edicao = st.session_state.get("orcamento_cliente_em_edicao")
-    telefone_edicao = st.session_state.get("orcamento_cliente_telefone")
 
-    if not numero_edicao or not telefone_edicao:
+    if not numero_edicao:
         return
 
     orcamentos = carregar_orcamentos()
     orcamento = localizar_orcamento_cliente(
         orcamentos,
         numero_edicao,
-        telefone_edicao,
     )
 
     if not orcamento:
         st.session_state.pop("orcamento_cliente_em_edicao", None)
-        st.session_state.pop("orcamento_cliente_telefone", None)
         st.warning("Esse orçamento não está mais disponível para edição.")
         return
 
@@ -2725,7 +2709,6 @@ def editor_orcamento_cliente():
         key="fechar_edicao_cliente",
     ):
         st.session_state.pop("orcamento_cliente_em_edicao", None)
-        st.session_state.pop("orcamento_cliente_telefone", None)
         st.rerun()
 
 
