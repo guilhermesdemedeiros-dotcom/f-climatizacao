@@ -880,6 +880,11 @@ def github_put_file(repo, path, text_content, message, sha=None):
 
 
 def salvar_config():
+    """Persiste no GitHub e mantém a cópia local sincronizada.
+
+    A gravação local ocorre somente depois do sucesso remoto, evitando
+    que o Streamlit recarregue um catálogo desatualizado no próximo rerun.
+    """
     texto = json.dumps(config, ensure_ascii=False, indent=2)
     _, sha = github_get_file(CONFIG_REPO, CONFIG_FILE)
     github_put_file(
@@ -889,6 +894,25 @@ def salvar_config():
         "Atualiza configurações pelo painel ADM",
         sha=sha,
     )
+    try:
+        # A cópia do repositório usada neste processo Streamlit não é
+        # atualizada automaticamente quando a API GitHub recebe um commit.
+        import tempfile
+        pasta = os.path.dirname(os.path.abspath(CONFIG_FILE)) or "."
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=pasta,
+            suffix=".json", delete=False
+        ) as temp:
+            temp.write(texto)
+            temporario = temp.name
+        os.replace(temporario, CONFIG_FILE)
+    except OSError:
+        # Em ambientes somente leitura o commit remoto já foi concluído.
+        # Preserve o erro como aviso visível, sem afirmar que o local atualizou.
+        st.warning(
+            "Configurações salvas no GitHub, mas a cópia local não pôde "
+            "ser sincronizada. Reabra o aplicativo após o deploy."
+        )
 
 
 def carregar_orcamentos():
@@ -3736,6 +3760,13 @@ def aba_materiais():
 
     financeiro = carregar_financeiro()
     custos_privados = financeiro.setdefault("custos_materiais", {})
+
+    total_materiais = len(config.get("materiais", {}))
+    st.caption(f"{total_materiais} material(is) cadastrado(s) no catálogo.")
+    st.caption(
+        "Todos os materiais cadastrados aparecem abaixo, inclusive os inativos. "
+        "Role a página para conferir a lista completa."
+    )
 
     reconstruidos = {}
 
