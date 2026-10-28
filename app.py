@@ -3753,8 +3753,8 @@ def aba_materiais():
         "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
-    st.caption("**VERSÃO EM EXECUÇÃO: MATERIAIS-V4 • 28/10/2026**")
-    st.info("MATERIAIS-V4: exclusão disponível dentro de cada material, com confirmação.")
+    st.caption("**VERSÃO EM EXECUÇÃO: MATERIAIS-V5 • 28/10/2026**")
+    st.info("MATERIAIS-V5: exclusão disponível dentro de cada material, com confirmação.")
 
     financeiro = carregar_financeiro()
     custos_privados = financeiro.setdefault("custos_materiais", {})
@@ -3846,17 +3846,17 @@ def aba_materiais():
             custos_privados[chave_final] = {"custo": float(custo_novo)}
             reconstruidos[chave_final] = dados
 
-            # Botão visível ao final de TODOS os formulários de materiais.
+            # Controles de exclusão, sempre dentro do expander editado.
             st.divider()
-            st.markdown("**Gerenciar este material**")
+            st.subheader("Excluir este material")
             st.caption("A exclusão não remove itens de orçamentos já emitidos.")
             confirmar_exclusao = st.checkbox(
                 f"Quero excluir definitivamente: {nome}",
-                key=f"materiais_v4_confirma_{idx}_{nome}",
+                key=f"materiais_v5_confirma_{idx}_{nome}",
             )
             if st.button(
-                "🗑️ EXCLUIR MATERIAL",
-                key=f"materiais_v4_excluir_{idx}_{nome}",
+                "EXCLUIR MATERIAL DEFINITIVAMENTE",
+                key=f"materiais_v5_excluir_{idx}_{nome}",
                 disabled=not confirmar_exclusao,
                 type="secondary",
                 use_container_width=True,
