@@ -161,7 +161,7 @@
       "preco": 6.08,
       "ativo": true
     },
-    "Mangueira corrugada": {
+    "Conduíte": {
       "unidade": "metro",
       "preco": 2.0,
       "ativo": true
@@ -169,11 +169,6 @@
     "Cano 20mm": {
       "unidade": "metro",
       "preco": 6.0,
-      "ativo": true
-    },
-    "Caixa de passagem": {
-      "unidade": "unidade",
-      "preco": 25.0,
       "ativo": true
     }
   },
