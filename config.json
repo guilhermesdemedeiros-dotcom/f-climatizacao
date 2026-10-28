@@ -163,8 +163,8 @@
     },
     "Tubo corrugado": {
       "unidade": "metro",
-      "preco": 4.8,
-      "ativo": false
+      "preco": 2.0,
+      "ativo": true
     },
     "Cano 20mm": {
       "unidade": "metro",
