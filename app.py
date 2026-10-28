@@ -2669,6 +2669,49 @@ def montar_item(
 # ADMIN - ORÇAMENTOS
 # =========================================================
 
+@st.dialog("Excluir orçamento")
+def confirmar_exclusao_orcamento(numero):
+    numero = str(numero).zfill(4)
+    registros = carregar_orcamentos()
+    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == numero), None)
+    if registro is None:
+        st.info("Este orçamento já foi excluído.")
+        if st.button("Fechar", key="orc_ausente_fechar"):
+            st.rerun()
+        return
+
+    cliente = registro.get("cliente", {}).get("nome", "Cliente")
+    st.warning(f"Excluir definitivamente o documento **{numero}** de **{cliente}**?")
+    st.caption("Esta operação exclui o orçamento inteiro da Gestão Comercial. "
+               "Se estiver faturado, também retira sua movimentação da Central. "
+               "A numeração de outros documentos não será alterada.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Cancelar", use_container_width=True, key="cancelar_orc_modal"):
+            st.rerun()
+    with c2:
+        if st.button("Sim, excluir definitivamente", type="primary", use_container_width=True,
+                     key="confirmar_orc_modal"):
+            restantes = [r for r in registros if str(r.get("numero", "")).zfill(4) != numero]
+            try:
+                salvar_orcamentos(restantes)
+            except Exception as e:
+                st.error(f"Não foi possível excluir o orçamento: {e}")
+                return
+            try:
+                financeiro_atual = carregar_financeiro()
+                movimentacoes = financeiro_atual.setdefault("movimentacoes", {})
+                if numero in movimentacoes:
+                    movimentacoes.pop(numero, None)
+                    salvar_financeiro(financeiro_atual)
+            except Exception as e:
+                st.error("O orçamento foi excluído, mas houve falha ao retirar o faturamento "
+                         f"da Central: {e}. Use Atualizar dados da Central para conciliar.")
+                return
+            st.session_state["adm_orc_excluido_msg"] = f"Documento {numero} excluído definitivamente."
+            st.rerun()
+
+
 def aba_orcamentos():
     secao(
         "Gestão comercial",
@@ -2678,6 +2721,10 @@ def aba_orcamentos():
     with tela_carregamento("Carregando gestão comercial..."):
         orcamentos = carregar_orcamentos()
         financeiro = carregar_financeiro()
+
+    aviso_exclusao = st.session_state.pop("adm_orc_excluido_msg", None)
+    if aviso_exclusao:
+        st.success(aviso_exclusao)
 
     with st.expander("Ferramentas da base"):
         st.caption(
@@ -2792,9 +2839,19 @@ def aba_orcamentos():
             "Faturado / Concluído": "Venda",
         }.get(o.get("status", "Orçamento"), "Orçamento")
 
-        with st.expander(
-            f"{tipo_rotulo} {numero} • {nome} • {rotulo_total}"
-        ):
+        col_registro, col_lixeira = st.columns([10, 1.6], gap="small", vertical_alignment="top")
+        with col_lixeira:
+            if st.button(
+                "🗑️", key=f"excluir_registro_comercial_{numero}",
+                help=f"Excluir {tipo_rotulo.lower()} {numero} definitivamente",
+                use_container_width=True,
+            ):
+                confirmar_exclusao_orcamento(numero)
+        with col_registro:
+            painel_registro = st.expander(
+                f"{tipo_rotulo} {numero} • {nome} • {rotulo_total}"
+            )
+        with painel_registro:
             st.caption(
                 f"{o.get('data','')} • "
                 f"{o.get('cliente',{}).get('telefone','')} • "
@@ -3814,7 +3871,16 @@ def aba_materiais():
     reconstruidos = {}
 
     for idx, (nome, dados) in enumerate(list(config["materiais"].items())):
-        with st.expander(nome):
+        col_item, col_lixeira = st.columns([10, 1.6], gap="small", vertical_alignment="top")
+        with col_lixeira:
+            if st.button(
+                "🗑️", key=f"lixeira_material_lista_{idx}_{nome}",
+                help=f"Excluir material {nome}", use_container_width=True,
+            ):
+                confirmar_exclusao_material(nome)
+        with col_item:
+            painel_material = st.expander(nome)
+        with painel_material:
             novo_nome = st.text_input(
                 "Nome / descrição",
                 value=nome,
@@ -3891,14 +3957,6 @@ def aba_materiais():
             custos_privados[chave_final] = {"custo": float(custo_novo)}
             reconstruidos[chave_final] = dados
 
-            # Compact action. A separate confirmation modal handles deletion.
-            st.write("")
-            if st.button(
-                "Excluir material",
-                key=f"excluir_material_{idx}_{nome}",
-                type="secondary",
-            ):
-                confirmar_exclusao_material(nome)
 
     config["materiais"] = reconstruidos
 
