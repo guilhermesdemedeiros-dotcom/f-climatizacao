@@ -3753,8 +3753,8 @@ def aba_materiais():
         "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
-    st.caption("**VERSÃO EM EXECUÇÃO: EXCLUSAO-V3 • 28/10/2026**")
-    st.info("EXCLUSAO-V3: cada material tem a opção de exclusão abaixo do campo de acréscimo (%).")
+    st.caption("**VERSÃO EM EXECUÇÃO: MATERIAIS-V4 • 28/10/2026**")
+    st.info("MATERIAIS-V4: exclusão disponível dentro de cada material, com confirmação.")
 
     financeiro = carregar_financeiro()
     custos_privados = financeiro.setdefault("custos_materiais", {})
@@ -3846,59 +3846,47 @@ def aba_materiais():
             custos_privados[chave_final] = {"custo": float(custo_novo)}
             reconstruidos[chave_final] = dados
 
-            # A exclusão fica dentro da edição do próprio item.
-            st.markdown("---")
-            st.warning("EXCLUSÃO DO MATERIAL — confira o nome antes de confirmar.")
-            st.markdown("**Excluir este material**")
-            st.caption(
-                "Remove do catálogo e das opções de novos orçamentos. "
-                "Não altera os orçamentos já emitidos."
-            )
+            # Botão visível ao final de TODOS os formulários de materiais.
+            st.divider()
+            st.markdown("**Gerenciar este material**")
+            st.caption("A exclusão não remove itens de orçamentos já emitidos.")
             confirmar_exclusao = st.checkbox(
-                f"Confirmo a exclusão de {nome}",
-                key=f"mat_confirma_exclusao_{idx}_{nome}",
+                f"Quero excluir definitivamente: {nome}",
+                key=f"materiais_v4_confirma_{idx}_{nome}",
             )
             if st.button(
-                f"EXCLUIR: {nome}",
-                key=f"mat_excluir_{idx}_{nome}",
+                "🗑️ EXCLUIR MATERIAL",
+                key=f"materiais_v4_excluir_{idx}_{nome}",
                 disabled=not confirmar_exclusao,
-                type="primary",
+                type="secondary",
                 use_container_width=True,
             ):
                 try:
-                    # Usa a listagem completa original; não depende da
-                    # reconstrução parcial que ocorre durante a renderização.
-                    original = dict(config["materiais"])
-                    anterior_custos = dict(custos_privados)
-                    original.pop(nome, None)
-                    original.pop(chave_final, None)
+                    # Apagar somente o cadastro selecionado, nunca os
+                    # registros já salvos nos orçamentos.
+                    catalogo_anterior = copy.deepcopy(config["materiais"])
+                    custos_anteriores = copy.deepcopy(custos_privados)
+                    novo_catalogo = copy.deepcopy(config["materiais"])
+                    novo_catalogo.pop(nome, None)
+                    config["materiais"] = novo_catalogo
                     custos_privados.pop(nome, None)
-                    custos_privados.pop(chave_final, None)
-                    config_anterior = dict(config["materiais"])
-                    config["materiais"] = original
                     try:
                         salvar_config()
                         salvar_financeiro(financeiro)
                     except Exception:
-                        config["materiais"] = config_anterior
+                        config["materiais"] = catalogo_anterior
                         custos_privados.clear()
-                        custos_privados.update(anterior_custos)
+                        custos_privados.update(custos_anteriores)
                         raise
-                    # Não reaproveita o estado de campos do material removido.
-                    for k in list(st.session_state):
-                        if k.startswith((
-                            f"mat_nome_{idx}_{nome}",
-                            f"mat_ativo_{idx}_{nome}",
-                            f"mat_un_{idx}_{nome}",
-                            f"mat_val_{idx}_{nome}",
-                            f"mat_custo_{idx}_{nome}",
-                            f"mat_margem_{idx}_{nome}",
-                            f"mat_confirma_exclusao_{idx}_{nome}",
-                        )):
-                            st.session_state.pop(k, None)
+                    # Não deixar o autosave do painel sobrescrever uma exclusão.
+                    st.session_state["_autosave_sig_painel"] = assinatura_dados(config)
+                    st.session_state["_autosave_fin_sig_materiais"] = assinatura_dados({
+                        "custos_materiais": financeiro.get("custos_materiais", {}),
+                        "custos_equipamentos": financeiro.get("custos_equipamentos", {}),
+                    })
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Não foi possível excluir o material: {e}")
+                    st.error(f"Erro ao excluir {nome}: {e}")
 
     config["materiais"] = reconstruidos
 
