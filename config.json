@@ -133,7 +133,7 @@
     "Suporte para condensadora": {
       "unidade": "unidade",
       "preco": 50.0,
-      "ativo": false,
+      "ativo": true,
       "mostrar_cliente": true
     },
     "Suporte 400mm": {
