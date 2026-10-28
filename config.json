@@ -72,7 +72,7 @@
     "Instalação infraestrutura ar condicionado": {
       "ativo": true,
       "mostrar_cliente": true,
-      "descricao": "",
+      "descricao": "Serviço de infra depende de análise dificuldade e mão de obra.\n",
       "precos": {
         "9.000 BTUs": 0.0,
         "12.000 BTUs": 0.0,
