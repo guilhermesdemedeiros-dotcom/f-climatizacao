@@ -3753,11 +3753,8 @@ def aba_materiais():
         "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
-    st.caption("Versão dos materiais: **EXCLUSAO-V2 • 28/10/2026**")
-    st.info(
-        "Abra um material e role até o fim da edição para encontrar "
-        "**EXCLUIR MATERIAL**. A exclusão exige confirmação."
-    )
+    st.caption("**VERSÃO EM EXECUÇÃO: EXCLUSAO-V3 • 28/10/2026**")
+    st.info("EXCLUSAO-V3: cada material tem a opção de exclusão abaixo do campo de acréscimo (%).")
 
     financeiro = carregar_financeiro()
     custos_privados = financeiro.setdefault("custos_materiais", {})
@@ -3850,7 +3847,8 @@ def aba_materiais():
             reconstruidos[chave_final] = dados
 
             # A exclusão fica dentro da edição do próprio item.
-            st.divider()
+            st.markdown("---")
+            st.warning("EXCLUSÃO DO MATERIAL — confira o nome antes de confirmar.")
             st.markdown("**Excluir este material**")
             st.caption(
                 "Remove do catálogo e das opções de novos orçamentos. "
@@ -3861,7 +3859,7 @@ def aba_materiais():
                 key=f"mat_confirma_exclusao_{idx}_{nome}",
             )
             if st.button(
-                "EXCLUIR MATERIAL DEFINITIVAMENTE",
+                f"EXCLUIR: {nome}",
                 key=f"mat_excluir_{idx}_{nome}",
                 disabled=not confirmar_exclusao,
                 type="primary",
