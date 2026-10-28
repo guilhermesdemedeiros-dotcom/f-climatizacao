@@ -154,6 +154,11 @@
       "unidade": "metro",
       "preco": 2.0,
       "ativo": true
+    },
+    "Cano 20mm": {
+      "unidade": "metro",
+      "preco": 6.0,
+      "ativo": true
     }
   },
   "equipamentos": {
