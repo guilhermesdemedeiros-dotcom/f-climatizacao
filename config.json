@@ -163,6 +163,11 @@
       "unidade": "unidade",
       "preco": 25.0,
       "ativo": true
+    },
+    "Fita pvc": {
+      "unidade": "unidade",
+      "preco": 4.5,
+      "ativo": true
     }
   },
   "equipamentos": {
