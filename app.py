@@ -2665,6 +2665,35 @@ def montar_item(
     }
 
 
+# Estilo das linhas administrativas: expansão e lixeira na MESMA linha.
+ESTILO_LINHAS_ADMIN = """
+<style>
+div[class*="st-key-fc_linha_material_"] div[data-testid="stHorizontalBlock"],
+div[class*="st-key-fc_linha_registro_"] div[data-testid="stHorizontalBlock"] {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-start !important;
+    gap: .35rem !important;
+    width: 100% !important;
+}
+div[class*="st-key-fc_linha_material_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child,
+div[class*="st-key-fc_linha_registro_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {
+    min-width: 0 !important; flex: 1 1 0% !important; width: 0 !important;
+}
+div[class*="st-key-fc_linha_material_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2),
+div[class*="st-key-fc_linha_registro_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) {
+    min-width: 39px !important; flex: 0 0 42px !important; width: 42px !important;
+}
+div[class*="st-key-fc_linha_material_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) button,
+div[class*="st-key-fc_linha_registro_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) button {
+    min-height: 40px !important; height: 40px !important;
+    padding: 0 !important; color: #ff6666 !important;
+    border: 1px solid #71404a !important; border-radius: 11px !important;
+    background: #151923 !important;
+}
+</style>
+"""
+
 # =========================================================
 # ADMIN - ORÇAMENTOS
 # =========================================================
@@ -2839,18 +2868,19 @@ def aba_orcamentos():
             "Faturado / Concluído": "Venda",
         }.get(o.get("status", "Orçamento"), "Orçamento")
 
-        col_registro, col_lixeira = st.columns([10, 1.6], gap="small", vertical_alignment="top")
-        with col_lixeira:
-            if st.button(
-                "🗑️", key=f"excluir_registro_comercial_{numero}",
-                help=f"Excluir {tipo_rotulo.lower()} {numero} definitivamente",
-                use_container_width=True,
-            ):
-                confirmar_exclusao_orcamento(numero)
-        with col_registro:
-            painel_registro = st.expander(
-                f"{tipo_rotulo} {numero} • {nome} • {rotulo_total}"
-            )
+        with st.container(key=f"fc_linha_registro_{numero}"):
+            col_registro, col_lixeira = st.columns([12, 1], gap="small", vertical_alignment="top")
+            with col_registro:
+                painel_registro = st.expander(
+                    f"{tipo_rotulo} {numero} • {nome} • {rotulo_total}"
+                )
+            with col_lixeira:
+                if st.button(
+                    "🗑", key=f"excluir_registro_comercial_{numero}",
+                    help=f"Excluir {tipo_rotulo.lower()} {numero}",
+                    use_container_width=True,
+                ):
+                    confirmar_exclusao_orcamento(numero)
         with painel_registro:
             st.caption(
                 f"{o.get('data','')} • "
@@ -3871,15 +3901,16 @@ def aba_materiais():
     reconstruidos = {}
 
     for idx, (nome, dados) in enumerate(list(config["materiais"].items())):
-        col_item, col_lixeira = st.columns([10, 1.6], gap="small", vertical_alignment="top")
-        with col_lixeira:
-            if st.button(
-                "🗑️", key=f"lixeira_material_lista_{idx}_{nome}",
-                help=f"Excluir material {nome}", use_container_width=True,
-            ):
-                confirmar_exclusao_material(nome)
-        with col_item:
-            painel_material = st.expander(nome)
+        with st.container(key=f"fc_linha_material_{idx}"):
+            col_item, col_lixeira = st.columns([12, 1], gap="small", vertical_alignment="top")
+            with col_item:
+                painel_material = st.expander(nome)
+            with col_lixeira:
+                if st.button(
+                    "🗑", key=f"lixeira_material_lista_{idx}_{nome}",
+                    help=f"Excluir material {nome}", use_container_width=True,
+                ):
+                    confirmar_exclusao_material(nome)
         with painel_material:
             novo_nome = st.text_input(
                 "Nome / descrição",
@@ -4776,6 +4807,48 @@ def pagina_central_faturamento():
 
 
 
+def aba_edicao_rapida_orcamentos():
+    """Atalho no ADM para edição completa dos orçamentos, sem misturar status."""
+    secao("Orçamentos", "Localize um orçamento e abra a edição completa por aqui.")
+    registros = carregar_orcamentos()
+    if not registros:
+        st.info("Nenhum orçamento cadastrado.")
+        return
+
+    termo = st.text_input(
+        "Buscar orçamento por número, cliente ou telefone",
+        key="adm_editor_busca_rapida",
+    ).strip().casefold()
+    candidatos = sorted(
+        registros,
+        key=lambda item: str(item.get("numero", "")), reverse=True,
+    )
+    if termo:
+        candidatos = [r for r in candidatos if termo in " ".join([
+            str(r.get("numero", "")),
+            str(r.get("cliente", {}).get("nome", "")),
+            str(r.get("cliente", {}).get("telefone", "")),
+        ]).casefold()]
+
+    selecionado = st.session_state.get("orcamento_cliente_em_edicao")
+    for r in candidatos:
+        numero = str(r.get("numero", "")).zfill(4)
+        cliente = r.get("cliente", {}).get("nome", "Cliente")
+        status = r.get("status", "Orçamento")
+        c_resumo, c_abrir = st.columns([4, 1], vertical_alignment="center")
+        with c_resumo:
+            st.caption(f"**#{numero}** · {cliente} · {status}")
+        with c_abrir:
+            if st.button("Editar", key=f"adm_rapido_editar_{numero}", use_container_width=True):
+                st.session_state["orcamento_cliente_em_edicao"] = numero
+                st.rerun()
+
+    if selecionado and any(str(r.get("numero", "")).zfill(4) == str(selecionado).zfill(4) for r in registros):
+        st.divider()
+        st.caption(f"Editando orçamento #{str(selecionado).zfill(4)}")
+        editor_orcamento_cliente()
+
+
 def pagina_admin():
     cabecalho(admin=True)
 
@@ -4828,9 +4901,12 @@ def pagina_admin():
         st.session_state["admin_view"] = "faturamento"
         st.rerun()
 
+    st.markdown(ESTILO_LINHAS_ADMIN, unsafe_allow_html=True)
+
     tabs = st.tabs(
         [
             "Gestão comercial",
+            "Orçamentos",
             "Serviços",
             "Materiais",
             "Aparelhos",
@@ -4842,14 +4918,16 @@ def pagina_admin():
     with tabs[0]:
         aba_orcamentos()
     with tabs[1]:
-        aba_servicos()
+        aba_edicao_rapida_orcamentos()
     with tabs[2]:
-        aba_materiais()
+        aba_servicos()
     with tabs[3]:
-        aba_aparelhos()
+        aba_materiais()
     with tabs[4]:
-        aba_regras()
+        aba_aparelhos()
     with tabs[5]:
+        aba_regras()
+    with tabs[6]:
         aba_empresa()
 
     st.divider()
