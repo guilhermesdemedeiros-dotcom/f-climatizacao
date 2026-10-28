@@ -161,14 +161,19 @@
       "preco": 6.08,
       "ativo": true
     },
-    "Tubo corrugado": {
+    "Conduíte": {
       "unidade": "metro",
-      "preco": 5.0,
+      "preco": 2.0,
       "ativo": true
     },
     "Cano 20mm": {
       "unidade": "metro",
       "preco": 6.0,
+      "ativo": true
+    },
+    "Cano corrugado": {
+      "unidade": "metro",
+      "preco": 4.5,
       "ativo": true
     }
   },
