@@ -3753,9 +3753,10 @@ def aba_materiais():
         "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
+    st.caption("Versão dos materiais: **EXCLUSAO-V2 • 28/10/2026**")
     st.info(
-        "Os materiais já cadastrados são mantidos no catálogo e podem ser renomeados. "
-        "Itens inativos deixam de aparecer nas opções de inclusão em novos orçamentos."
+        "Abra um material e role até o fim da edição para encontrar "
+        "**EXCLUIR MATERIAL**. A exclusão exige confirmação."
     )
 
     financeiro = carregar_financeiro()
@@ -3832,22 +3833,20 @@ def aba_materiais():
 
             chave_final = novo_nome or nome
 
-            # Mantém o custo privado associado ao nome final.
-            if nome != chave_final:
-                custos_privados.pop(nome, None)
-
-            custos_privados[chave_final] = {
-                "custo": float(custo_novo),
-            }
-
-            # Evita sobrescrever silenciosamente outro material com o mesmo nome.
-            if chave_final in reconstruidos and chave_final != nome:
+            # Não permitir que renomeação sobrescreva outro material.
+            if chave_final != nome and (
+                chave_final in config["materiais"] or chave_final in reconstruidos
+            ):
                 st.warning(
                     "Já existe outro material com esse nome. "
-                    "Use um nome diferente antes de salvar."
+                    "Escolha um nome diferente."
                 )
                 chave_final = nome
 
+            # Mantém o custo privado associado ao nome efetivamente salvo.
+            if nome != chave_final:
+                custos_privados.pop(nome, None)
+            custos_privados[chave_final] = {"custo": float(custo_novo)}
             reconstruidos[chave_final] = dados
 
             # A exclusão fica dentro da edição do próprio item.
@@ -3862,10 +3861,10 @@ def aba_materiais():
                 key=f"mat_confirma_exclusao_{idx}_{nome}",
             )
             if st.button(
-                "🗑 Excluir material",
+                "EXCLUIR MATERIAL DEFINITIVAMENTE",
                 key=f"mat_excluir_{idx}_{nome}",
                 disabled=not confirmar_exclusao,
-                type="secondary",
+                type="primary",
                 use_container_width=True,
             ):
                 try:
@@ -3877,11 +3876,13 @@ def aba_materiais():
                     original.pop(chave_final, None)
                     custos_privados.pop(nome, None)
                     custos_privados.pop(chave_final, None)
+                    config_anterior = dict(config["materiais"])
                     config["materiais"] = original
-                    salvar_config()
                     try:
+                        salvar_config()
                         salvar_financeiro(financeiro)
                     except Exception:
+                        config["materiais"] = config_anterior
                         custos_privados.clear()
                         custos_privados.update(anterior_custos)
                         raise
