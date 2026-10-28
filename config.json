@@ -149,6 +149,11 @@
       "unidade": "unidade",
       "preco": 6.08,
       "ativo": true
+    },
+    "Conduíte": {
+      "unidade": "metro",
+      "preco": 2.0,
+      "ativo": true
     }
   },
   "equipamentos": {
