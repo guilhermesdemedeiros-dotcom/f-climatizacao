@@ -129,6 +129,11 @@
       "unidade": "unidade",
       "preco": 40.0,
       "ativo": true
+    },
+    "Esponjoso 1/4": {
+      "unidade": "unidade",
+      "preco": 3.93,
+      "ativo": true
     }
   },
   "equipamentos": {
