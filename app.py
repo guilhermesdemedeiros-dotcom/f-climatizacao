@@ -3764,8 +3764,8 @@ def aba_materiais():
     total_materiais = len(config.get("materiais", {}))
     st.caption(f"{total_materiais} material(is) cadastrado(s) no catálogo.")
     st.caption(
-        "Todos os materiais cadastrados aparecem abaixo, inclusive os inativos. "
-        "Role a página para conferir a lista completa."
+        "Toque no nome de um material para editar. "
+        "Dentro de cada item, abaixo dos campos, está o botão Excluir material."
     )
 
     reconstruidos = {}
@@ -3850,43 +3850,56 @@ def aba_materiais():
 
             reconstruidos[chave_final] = dados
 
+            # A exclusão fica dentro da edição do próprio item.
             st.divider()
+            st.markdown("**Excluir este material**")
+            st.caption(
+                "Remove do catálogo e das opções de novos orçamentos. "
+                "Não altera os orçamentos já emitidos."
+            )
             confirmar_exclusao = st.checkbox(
-                "Confirmo que desejo excluir este material do catálogo",
+                f"Confirmo a exclusão de {nome}",
                 key=f"mat_confirma_exclusao_{idx}_{nome}",
             )
             if st.button(
-                "Excluir material",
+                "🗑 Excluir material",
                 key=f"mat_excluir_{idx}_{nome}",
                 disabled=not confirmar_exclusao,
+                type="secondary",
                 use_container_width=True,
             ):
-                # Apaga somente do catálogo e do cadastro de custos futuros.
-                # Itens já salvos em orçamentos permanecem intactos.
                 try:
-                    catalogo_anterior = config["materiais"]
-                    custos_anteriores = dict(custos_privados)
-                    novo_catalogo = dict(reconstruidos)
-                    novo_catalogo.pop(chave_final, None)
-                    # Inclui materiais que ainda não foram processados no loop.
-                    for nome_pendente, dados_pendentes in list(catalogo_anterior.items())[idx + 1:]:
-                        novo_catalogo[nome_pendente] = dados_pendentes
-                    config["materiais"] = novo_catalogo
+                    # Usa a listagem completa original; não depende da
+                    # reconstrução parcial que ocorre durante a renderização.
+                    original = dict(config["materiais"])
+                    anterior_custos = dict(custos_privados)
+                    original.pop(nome, None)
+                    original.pop(chave_final, None)
                     custos_privados.pop(nome, None)
                     custos_privados.pop(chave_final, None)
+                    config["materiais"] = original
                     salvar_config()
                     try:
                         salvar_financeiro(financeiro)
                     except Exception:
-                        # Não perde o custo anterior se a gravação privada falhar.
                         custos_privados.clear()
-                        custos_privados.update(custos_anteriores)
+                        custos_privados.update(anterior_custos)
                         raise
-                    st.session_state.pop("_autosave_fin_sig_materiais", None)
-                    st.success("Material excluído do catálogo. Orçamentos existentes preservados.")
+                    # Não reaproveita o estado de campos do material removido.
+                    for k in list(st.session_state):
+                        if k.startswith((
+                            f"mat_nome_{idx}_{nome}",
+                            f"mat_ativo_{idx}_{nome}",
+                            f"mat_un_{idx}_{nome}",
+                            f"mat_val_{idx}_{nome}",
+                            f"mat_custo_{idx}_{nome}",
+                            f"mat_margem_{idx}_{nome}",
+                            f"mat_confirma_exclusao_{idx}_{nome}",
+                        )):
+                            st.session_state.pop(k, None)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Não foi possível concluir a exclusão: {e}")
+                    st.error(f"Não foi possível excluir o material: {e}")
 
     config["materiais"] = reconstruidos
 
