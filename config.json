@@ -133,7 +133,7 @@
     "Suporte para condensadora": {
       "unidade": "unidade",
       "preco": 50.0,
-      "ativo": true,
+      "ativo": false,
       "mostrar_cliente": true
     },
     "Suporte 400mm": {
@@ -169,11 +169,6 @@
     "Cano 20mm": {
       "unidade": "metro",
       "preco": 6.0,
-      "ativo": true
-    },
-    "Cano corrugado": {
-      "unidade": "metro",
-      "preco": 4.5,
       "ativo": true
     }
   },
