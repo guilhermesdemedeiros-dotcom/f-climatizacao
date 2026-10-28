@@ -68,6 +68,17 @@
         "18.000 BTUs": 0.0,
         "24.000 BTUs": 0.0
       }
+    },
+    "Instalação infraestrutura ar condicionado": {
+      "ativo": true,
+      "mostrar_cliente": true,
+      "descricao": "",
+      "precos": {
+        "9.000 BTUs": 0.0,
+        "12.000 BTUs": 0.0,
+        "18.000 BTUs": 0.0,
+        "24.000 BTUs": 0.0
+      }
     }
   },
   "materiais": {
