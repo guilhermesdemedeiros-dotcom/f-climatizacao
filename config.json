@@ -106,12 +106,6 @@
       "ativo": true,
       "mostrar_cliente": false
     },
-    "Tubo de cobre 3/4\"": {
-      "unidade": "metro",
-      "preco": 0.0,
-      "ativo": true,
-      "mostrar_cliente": false
-    },
     "Canaleta": {
       "unidade": "metro",
       "preco": 45.0,
