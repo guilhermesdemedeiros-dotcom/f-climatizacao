@@ -890,10 +890,12 @@ config = carregar_config()
 
 
 def salvar_config():
-    """Persiste no GitHub e mantém a cópia local sincronizada.
+    """Salva o catálogo no GitHub, a fonte persistente das configurações.
 
-    A gravação local ocorre somente depois do sucesso remoto, evitando
-    que o Streamlit recarregue um catálogo desatualizado no próximo rerun.
+    Não regrava config.json no filesystem do Streamlit Cloud: tal gravação
+    pode acionar o observador de arquivos e recarregar o processo, além de
+    não atualizar a cópia do GitHub clonada no deploy de modo confiável.
+    No próximo rerun, carregar_config() lê o conteúdo mais recente via API.
     """
     texto = json.dumps(config, ensure_ascii=False, indent=2)
     _, sha = github_get_file(CONFIG_REPO, CONFIG_FILE)
@@ -904,25 +906,6 @@ def salvar_config():
         "Atualiza configurações pelo painel ADM",
         sha=sha,
     )
-    try:
-        # A cópia do repositório usada neste processo Streamlit não é
-        # atualizada automaticamente quando a API GitHub recebe um commit.
-        import tempfile
-        pasta = os.path.dirname(os.path.abspath(CONFIG_FILE)) or "."
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=pasta,
-            suffix=".json", delete=False
-        ) as temp:
-            temp.write(texto)
-            temporario = temp.name
-        os.replace(temporario, CONFIG_FILE)
-    except OSError:
-        # Em ambientes somente leitura o commit remoto já foi concluído.
-        # Preserve o erro como aviso visível, sem afirmar que o local atualizou.
-        st.warning(
-            "Configurações salvas no GitHub, mas a cópia local não pôde "
-            "ser sincronizada. Reabra o aplicativo após o deploy."
-        )
 
 
 def carregar_orcamentos():
