@@ -173,6 +173,11 @@
       "unidade": "unidade",
       "preco": 11.5,
       "ativo": true
+    },
+    "Cabo pp 4 vias 2.5mm": {
+      "unidade": "unidade",
+      "preco": 18.5,
+      "ativo": true
     }
   },
   "equipamentos": {
