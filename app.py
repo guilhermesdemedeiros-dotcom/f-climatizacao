@@ -610,14 +610,20 @@ def migrar_config(dados):
 
 
 def carregar_config():
+    # Alterações do administrador são gravadas por API no GitHub. A cópia
+    # local do deploy pode ficar antiga; priorize a fonte persistida.
+    try:
+        remoto, _ = github_get_file(CONFIG_REPO, CONFIG_FILE)
+        if remoto is not None:
+            return migrar_config(json.loads(remoto))
+    except Exception:
+        pass
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return migrar_config(json.load(f))
     except Exception:
         return copy.deepcopy(DEFAULT_CONFIG)
 
-
-config = carregar_config()
 
 
 # =========================================================
@@ -877,6 +883,10 @@ def github_put_file(repo, path, text_content, message, sha=None):
     if sha:
         payload["sha"] = sha
     return github_request(url, method="PUT", data=payload)
+
+
+# Carrega configuração depois de definir acesso à API GitHub.
+config = carregar_config()
 
 
 def salvar_config():
@@ -3747,23 +3757,75 @@ def aba_servicos():
 # ADMIN - MATERIAIS
 # =========================================================
 
+@st.dialog("Confirmar exclusão de material")
+def confirmar_exclusao_material(nome):
+    st.warning(f"Você deseja excluir definitivamente o material **{nome}**?")
+    st.caption("O cadastro e seu custo privado serão excluídos. Os itens já registrados em orçamentos antigos permanecem no histórico.")
+    c_cancelar, c_excluir = st.columns(2)
+    with c_cancelar:
+        if st.button("Cancelar", use_container_width=True, key="cancelar_exclusao_mat_dialog"):
+            st.rerun()
+    with c_excluir:
+        if st.button("Sim, excluir definitivamente", type="primary", use_container_width=True, key="confirmar_exclusao_mat_dialog"):
+            if nome not in config.get("materiais", {}):
+                st.info("O material já não existe no catálogo.")
+                return
+            financeiro_atual = carregar_financeiro()
+            catalogo_anterior = copy.deepcopy(config["materiais"])
+            novo_catalogo = copy.deepcopy(catalogo_anterior)
+            novo_catalogo.pop(nome, None)
+            custos_anteriores = copy.deepcopy(financeiro_atual.get("custos_materiais", {}))
+            config["materiais"] = novo_catalogo
+            try:
+                # Primeiro efetiva a exclusão do catálogo; falha remota restaura
+                # a cópia local, sem fingir que o material foi excluído.
+                salvar_config()
+            except Exception as exc:
+                config["materiais"] = catalogo_anterior
+                st.error(f"Não foi possível excluir: {exc}")
+                return
+            financeiro_atual.setdefault("custos_materiais", {}).pop(nome, None)
+            try:
+                salvar_financeiro(financeiro_atual)
+            except Exception as exc:
+                # O material foi excluído com sucesso; informe explicitamente
+                # se apenas a limpeza do custo privado falhou.
+                st.error(f"Material excluído, mas não foi possível limpar o custo privado: {exc}")
+                return
+            st.session_state["_autosave_sig_painel"] = assinatura_dados(config)
+            st.session_state["_autosave_fin_sig_materiais"] = assinatura_dados({
+                "custos_materiais": financeiro_atual.get("custos_materiais", {}),
+                "custos_equipamentos": financeiro_atual.get("custos_equipamentos", {}),
+            })
+            st.session_state["material_excluido_msg"] = f"Material '{nome}' excluído definitivamente."
+            st.rerun()
+
+
 def aba_materiais():
     secao(
         "Materiais",
         "Edite nome, unidade, preço e disponibilidade do catálogo interno.",
     )
 
-    st.caption("**VERSÃO EM EXECUÇÃO: MATERIAIS-V5 • 28/10/2026**")
-    st.info("MATERIAIS-V5: exclusão disponível dentro de cada material, com confirmação.")
+    mensagem = st.session_state.pop("material_excluido_msg", None)
+    if mensagem:
+        st.success(mensagem)
+
+    st.caption(f"{len(config.get('materiais', {}))} materiais cadastrados.")
 
     financeiro = carregar_financeiro()
     custos_privados = financeiro.setdefault("custos_materiais", {})
-
-    total_materiais = len(config.get("materiais", {}))
-    st.caption(f"{total_materiais} material(is) cadastrado(s) no catálogo.")
-    st.caption(
-        "Toque no nome de um material para editar. "
-        "Dentro de cada item, abaixo dos campos, está o botão Excluir material."
+    # Capture persisted state before widgets mutate catalog and costs.
+    # This makes even the first edit of a new session persist reliably.
+    st.session_state.setdefault(
+        "_autosave_sig_painel", assinatura_dados(config)
+    )
+    st.session_state.setdefault(
+        "_autosave_fin_sig_materiais",
+        assinatura_dados({
+            "custos_materiais": financeiro.get("custos_materiais", {}),
+            "custos_equipamentos": financeiro.get("custos_equipamentos", {}),
+        }),
     )
 
     reconstruidos = {}
@@ -3846,47 +3908,14 @@ def aba_materiais():
             custos_privados[chave_final] = {"custo": float(custo_novo)}
             reconstruidos[chave_final] = dados
 
-            # Controles de exclusão, sempre dentro do expander editado.
-            st.divider()
-            st.subheader("Excluir este material")
-            st.caption("A exclusão não remove itens de orçamentos já emitidos.")
-            confirmar_exclusao = st.checkbox(
-                f"Quero excluir definitivamente: {nome}",
-                key=f"materiais_v5_confirma_{idx}_{nome}",
-            )
+            # Compact action. A separate confirmation modal handles deletion.
+            st.write("")
             if st.button(
-                "EXCLUIR MATERIAL DEFINITIVAMENTE",
-                key=f"materiais_v5_excluir_{idx}_{nome}",
-                disabled=not confirmar_exclusao,
+                "Excluir material",
+                key=f"excluir_material_{idx}_{nome}",
                 type="secondary",
-                use_container_width=True,
             ):
-                try:
-                    # Apagar somente o cadastro selecionado, nunca os
-                    # registros já salvos nos orçamentos.
-                    catalogo_anterior = copy.deepcopy(config["materiais"])
-                    custos_anteriores = copy.deepcopy(custos_privados)
-                    novo_catalogo = copy.deepcopy(config["materiais"])
-                    novo_catalogo.pop(nome, None)
-                    config["materiais"] = novo_catalogo
-                    custos_privados.pop(nome, None)
-                    try:
-                        salvar_config()
-                        salvar_financeiro(financeiro)
-                    except Exception:
-                        config["materiais"] = catalogo_anterior
-                        custos_privados.clear()
-                        custos_privados.update(custos_anteriores)
-                        raise
-                    # Não deixar o autosave do painel sobrescrever uma exclusão.
-                    st.session_state["_autosave_sig_painel"] = assinatura_dados(config)
-                    st.session_state["_autosave_fin_sig_materiais"] = assinatura_dados({
-                        "custos_materiais": financeiro.get("custos_materiais", {}),
-                        "custos_equipamentos": financeiro.get("custos_equipamentos", {}),
-                    })
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao excluir {nome}: {e}")
+                confirmar_exclusao_material(nome)
 
     config["materiais"] = reconstruidos
 
