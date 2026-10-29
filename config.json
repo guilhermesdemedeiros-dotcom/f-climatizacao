@@ -84,7 +84,7 @@
   "materiais": {
     "Tubo de cobre 1/4\"": {
       "unidade": "metro",
-      "preco": 22.0,
+      "preco": 26.4,
       "ativo": true,
       "mostrar_cliente": false
     },
