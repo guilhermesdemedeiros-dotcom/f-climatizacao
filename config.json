@@ -108,7 +108,7 @@
     },
     "Canaleta": {
       "unidade": "metro",
-      "preco": 45.0,
+      "preco": 67.5,
       "ativo": true,
       "mostrar_cliente": true
     },
