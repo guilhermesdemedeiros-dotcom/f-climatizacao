@@ -2665,6 +2665,19 @@ def montar_item(
     }
 
 
+def servico_cobrado_por_ponto(nome):
+    dados = config.get("servicos", {}).get(nome, {})
+    return bool(dados.get("cobranca_por_ponto", "infraestrutura" in nome.lower()))
+
+
+def descricao_servico_orcamento(nome, capacidade, quantidade):
+    if servico_cobrado_por_ponto(nome):
+        return f"{nome} • {int(quantidade)} ponto(s)" + (
+            f" • {capacidade}" if capacidade else ""
+        )
+    return f"{nome} • {capacidade}" if capacidade else f"{nome} • capacidade a confirmar"
+
+
 # Estilo das linhas administrativas: expansão e lixeira na MESMA linha.
 ESTILO_LINHAS_ADMIN = """
 <style>
@@ -3467,7 +3480,7 @@ def aba_orcamentos():
                                 item_para_adicionar = montar_item(
                                     f"{servico_nome} • {capacidade_serv}",
                                     servico_qtd,
-                                    "serviço",
+                                    "ponto" if servico_cobrado_por_ponto(servico_nome) else "serviço",
                                     preco_servico,
                                     origem="servico",
                                     desconto_percentual=servico_desc,
@@ -3717,20 +3730,44 @@ def aba_servicos():
                 value=dados.get("descricao", ""),
                 key=f"serv_desc_{idx}_{nome}",
             )
+            dados["cobranca_por_ponto"] = st.checkbox(
+                "Cobrar por ponto (quantidade × valor unitário)",
+                value=bool(dados.get("cobranca_por_ponto", "infraestrutura" in nome.lower())),
+                key=f"serv_por_ponto_{idx}_{nome}",
+                help="Ideal para instalação de infraestrutura. O valor informado para cada capacidade é cobrado por ponto.",
+            )
+            if dados["cobranca_por_ponto"]:
+                st.caption("Os preços abaixo são por ponto. Ex.: 4 pontos × R$ 250 = R$ 1.000.")
 
             dados.setdefault("precos", {})
 
-            c1, c2 = st.columns(2)
-            for cap_idx, cap in enumerate(CAPACIDADES):
-                coluna = c1 if cap_idx % 2 == 0 else c2
-                with coluna:
-                    dados["precos"][cap] = st.number_input(
-                        cap,
-                        min_value=0.0,
-                        value=float(dados["precos"].get(cap, 0) or 0),
-                        step=10.0,
-                        key=f"serv_preco_{idx}_{nome}_{cap}",
-                    )
+            if dados["cobranca_por_ponto"]:
+                preco_atual_ponto = float(
+                    dados.get("preco_por_ponto", 0)
+                    or next((v for v in dados["precos"].values() if float(v or 0) > 0), 0)
+                    or 0
+                )
+                valor_ponto = st.number_input(
+                    "Valor de cada ponto (R$)",
+                    min_value=0.0,
+                    value=preco_atual_ponto,
+                    step=10.0,
+                    key=f"serv_ponto_preco_{idx}_{nome}",
+                )
+                dados["preco_por_ponto"] = float(valor_ponto)
+                dados["precos"] = {cap: float(valor_ponto) for cap in CAPACIDADES}
+            else:
+                c1, c2 = st.columns(2)
+                for cap_idx, cap in enumerate(CAPACIDADES):
+                    coluna = c1 if cap_idx % 2 == 0 else c2
+                    with coluna:
+                        dados["precos"][cap] = st.number_input(
+                            cap,
+                            min_value=0.0,
+                            value=float(dados["precos"].get(cap, 0) or 0),
+                            step=10.0,
+                            key=f"serv_preco_{idx}_{nome}_{cap}",
+                        )
 
             excluir = st.checkbox(
                 "Excluir este serviço",
@@ -3779,20 +3816,34 @@ def aba_servicos():
             value=True,
             key="novo_serv_catalogo_cliente",
         )
+        novo_serv_pontos = st.checkbox(
+            "Cobrar por ponto (infraestrutura)",
+            value="infraestrutura" in novo_serv_nome.lower(),
+            key="novo_serv_catalogo_por_ponto",
+        )
+        if novo_serv_pontos:
+            st.caption("Cadastre o preço de UM ponto. No orçamento será informada a quantidade de pontos.")
 
         novos_precos = {}
-
-        c1, c2 = st.columns(2)
-        for cap_idx, cap in enumerate(CAPACIDADES):
-            coluna = c1 if cap_idx % 2 == 0 else c2
-            with coluna:
-                novos_precos[cap] = st.number_input(
-                    cap,
-                    min_value=0.0,
-                    value=0.0,
-                    step=10.0,
-                    key=f"novo_serv_catalogo_preco_{cap}",
-                )
+        preco_novo_ponto = 0.0
+        if novo_serv_pontos:
+            preco_novo_ponto = st.number_input(
+                "Preço por ponto (R$)", min_value=0.0, value=0.0, step=10.0,
+                key="novo_serv_catalogo_preco_ponto",
+            )
+            novos_precos = {cap: float(preco_novo_ponto) for cap in CAPACIDADES}
+        else:
+            c1, c2 = st.columns(2)
+            for cap_idx, cap in enumerate(CAPACIDADES):
+                coluna = c1 if cap_idx % 2 == 0 else c2
+                with coluna:
+                    novos_precos[cap] = st.number_input(
+                        cap,
+                        min_value=0.0,
+                        value=0.0,
+                        step=10.0,
+                        key=f"novo_serv_catalogo_preco_{cap}",
+                    )
 
         if st.button(
             "Adicionar serviço",
@@ -3809,6 +3860,8 @@ def aba_servicos():
                     "ativo": bool(novo_serv_ativo),
                     "mostrar_cliente": bool(novo_serv_cliente),
                     "descricao": novo_serv_desc.strip(),
+                    "cobranca_por_ponto": bool(novo_serv_pontos),
+                    "preco_por_ponto": float(preco_novo_ponto),
                     "precos": {
                         cap: float(valor)
                         for cap, valor in novos_precos.items()
@@ -5497,6 +5550,16 @@ def editor_orcamento_cliente():
             default=defaults_servicos,
             key=f"edit_servicos_{numero}",
         )
+        edit_quantidades_pontos = {}
+        for nome_servico in edit_servicos:
+            if servico_cobrado_por_ponto(nome_servico):
+                qtd_anterior = next((int(float(i.get("quantidade", 1) or 1)) for i in itens_atuais
+                    if i.get("origem") == "servico" and str(i.get("descricao", "")).startswith(nome_servico + " •")), 1)
+                edit_quantidades_pontos[nome_servico] = st.number_input(
+                    f"Quantidade de pontos — {nome_servico}",
+                    min_value=1, max_value=10000, value=max(1, qtd_anterior), step=1,
+                    key=f"edit_pontos_{numero}_{nome_servico}",
+                )
 
     # -----------------------------------------------------
     # MATERIAIS / QUANTIDADES
@@ -5817,17 +5880,13 @@ def editor_orcamento_cliente():
                         or 0
                     ) if cap_servico_editor else 0.0
 
-                    descricao_servico = (
-                        f"{nome_servico} • {cap_servico_editor}"
-                        if cap_servico_editor
-                        else f"{nome_servico} • capacidade a confirmar"
-                    )
+                    descricao_servico = descricao_servico_orcamento(nome_servico, cap_servico_editor, edit_quantidades_pontos.get(nome_servico, 1))
 
                     novos_itens.append(
                         montar_item(
                             descricao_servico,
-                            1,
-                            "serviço",
+                            edit_quantidades_pontos.get(nome_servico, 1),
+                            "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             valor,
                             origem="servico",
                         )
@@ -5866,8 +5925,10 @@ def editor_orcamento_cliente():
 
                             servicos_eq.append(
                                 {
-                                    "descricao": f"{nome_servico} • {cap_eq}",
-                                    "valor": valor,
+                                    "descricao": descricao_servico_orcamento(nome_servico, cap_eq, edit_quantidades_pontos.get(nome_servico, 1)),
+                                    "quantidade": edit_quantidades_pontos.get(nome_servico, 1),
+                                    "valor_unitario": valor,
+                                    "valor": valor * edit_quantidades_pontos.get(nome_servico, 1),
                                 }
                             )
 
@@ -5907,15 +5968,13 @@ def editor_orcamento_cliente():
                             or 0
                         ) if cap_existente_editor else 0.0
                         descricao = (
-                            f"{nome_servico} • {cap_existente_editor}"
-                            if cap_existente_editor
-                            else f"{nome_servico} • capacidade a confirmar"
+                            descricao_servico_orcamento(nome_servico, cap_existente_editor, edit_quantidades_pontos.get(nome_servico, 1))
                         )
                         novos_itens.append(
                             montar_item(
                                 descricao,
-                                1,
-                                "serviço",
+                                edit_quantidades_pontos.get(nome_servico, 1),
+                                "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                                 valor,
                                 origem="servico",
                             )
@@ -5948,16 +6007,16 @@ def editor_orcamento_cliente():
                         )
                         or 0
                     )
-                    descricao = f"{nome_servico} • {cap_servico}"
+                    descricao = descricao_servico_orcamento(nome_servico, cap_servico, edit_quantidades_pontos.get(nome_servico, 1))
                 else:
                     valor = 0.0
-                    descricao = f"{nome_servico} • capacidade a confirmar"
+                    descricao = descricao_servico_orcamento(nome_servico, None, edit_quantidades_pontos.get(nome_servico, 1))
 
                 novos_itens.append(
                     montar_item(
                         descricao,
-                        1,
-                        "serviço",
+                        edit_quantidades_pontos.get(nome_servico, 1),
+                        "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                         valor,
                         origem="servico",
                     )
@@ -6406,6 +6465,17 @@ def pagina_cliente():
         key="cliente_servicos",
     )
 
+    quantidades_servicos_pontos = {}
+    for nome_servico in servicos:
+        if servico_cobrado_por_ponto(nome_servico):
+            quantidades_servicos_pontos[nome_servico] = st.number_input(
+                f"Quantidade de pontos — {nome_servico}",
+                min_value=1, max_value=10000, value=1, step=1,
+                key=f"cliente_pontos_{nome_servico}",
+                help="O preço unitário cadastrado será multiplicado pelo número de pontos.",
+            )
+            st.caption(f"Cobrança por ponto • {int(quantidades_servicos_pontos[nome_servico])} ponto(s)")
+
     materiais_selecionados = []
 
     materiais_ativos_cliente = {
@@ -6630,16 +6700,14 @@ def pagina_cliente():
                 ) if cap_servicos else 0.0
 
                 descricao_servico = (
-                    f"{nome_servico} • {cap_servicos}"
-                    if cap_servicos
-                    else f"{nome_servico} • capacidade a confirmar"
+                    descricao_servico_orcamento(nome_servico, cap_servicos, quantidades_servicos_pontos.get(nome_servico, 1))
                 )
 
                 itens.append(
                     montar_item(
                         descricao_servico,
-                        1,
-                        "serviço",
+                        quantidades_servicos_pontos.get(nome_servico, 1),
+                        "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                         valor,
                         origem="servico",
                     )
@@ -6679,8 +6747,10 @@ def pagina_cliente():
 
                         servicos_opcao.append(
                             {
-                                "descricao": f"{nome_servico} • {cap_opcao}",
-                                "valor": valor_servico,
+                                "descricao": descricao_servico_orcamento(nome_servico, cap_opcao, quantidades_servicos_pontos.get(nome_servico, 1)),
+                                "quantidade": quantidades_servicos_pontos.get(nome_servico, 1),
+                                "valor_unitario": valor_servico,
+                                "valor": valor_servico * quantidades_servicos_pontos.get(nome_servico, 1),
                             }
                         )
 
@@ -6710,15 +6780,13 @@ def pagina_cliente():
                         or 0
                     ) if cap_existente else 0.0
                     descricao_servico = (
-                        f"{nome_servico} • {cap_existente}"
-                        if cap_existente
-                        else f"{nome_servico} • capacidade a confirmar"
+                        descricao_servico_orcamento(nome_servico, cap_existente, quantidades_servicos_pontos.get(nome_servico, 1))
                     )
                     itens.append(
                         montar_item(
                             descricao_servico,
-                            1,
-                            "serviço",
+                            quantidades_servicos_pontos.get(nome_servico, 1),
+                            "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             valor,
                             origem="servico",
                         )
@@ -6743,9 +6811,9 @@ def pagina_cliente():
 
                     itens.append(
                         montar_item(
-                            f"{nome_servico} • {cap_calculo}",
-                            1,
-                            "serviço",
+                            descricao_servico_orcamento(nome_servico, cap_calculo, quantidades_servicos_pontos.get(nome_servico, 1)),
+                            quantidades_servicos_pontos.get(nome_servico, 1),
+                            "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             valor,
                             origem="servico",
                         )
@@ -6754,9 +6822,9 @@ def pagina_cliente():
                 for nome_servico in servicos:
                     itens.append(
                         montar_item(
-                            f"{nome_servico} • capacidade a confirmar",
-                            1,
-                            "serviço",
+                            descricao_servico_orcamento(nome_servico, None, quantidades_servicos_pontos.get(nome_servico, 1)),
+                            quantidades_servicos_pontos.get(nome_servico, 1),
+                            "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             0,
                             origem="servico",
                         )
