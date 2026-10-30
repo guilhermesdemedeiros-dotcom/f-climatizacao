@@ -84,7 +84,7 @@
         "18.000 BTUs": 250.0,
         "24.000 BTUs": 250.0
       },
-      "cobranca_por_ponto": false,
+      "cobranca_por_ponto": true,
       "preco_por_ponto": 250.0
     }
   },
