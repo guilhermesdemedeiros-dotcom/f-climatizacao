@@ -21,7 +21,8 @@
         "12.000 BTUs": 280.0,
         "18.000 BTUs": 350.0,
         "24.000 BTUs": 400.0
-      }
+      },
+      "cobranca_por_ponto": false
     },
     "Higienização": {
       "icone": "🧼",
@@ -33,7 +34,8 @@
         "12.000 BTUs": 150.0,
         "18.000 BTUs": 160.0,
         "24.000 BTUs": 180.0
-      }
+      },
+      "cobranca_por_ponto": false
     },
     "Desinstalação": {
       "icone": "📦",
@@ -45,7 +47,8 @@
         "12.000 BTUs": 120.0,
         "18.000 BTUs": 160.0,
         "24.000 BTUs": 200.0
-      }
+      },
+      "cobranca_por_ponto": false
     },
     "Carga de gás": {
       "ativo": true,
@@ -56,7 +59,8 @@
         "12.000 BTUs": 280.0,
         "18.000 BTUs": 400.0,
         "24.000 BTUs": 480.0
-      }
+      },
+      "cobranca_por_ponto": false
     },
     "Instalação elétrica": {
       "ativo": true,
@@ -67,18 +71,21 @@
         "12.000 BTUs": 0.0,
         "18.000 BTUs": 0.0,
         "24.000 BTUs": 0.0
-      }
+      },
+      "cobranca_por_ponto": false
     },
     "Instalação Infraestrutura": {
       "ativo": true,
       "mostrar_cliente": true,
       "descricao": "",
       "precos": {
-        "9.000 BTUs": 0.0,
-        "12.000 BTUs": 0.0,
-        "18.000 BTUs": 0.0,
-        "24.000 BTUs": 0.0
-      }
+        "9.000 BTUs": 250.0,
+        "12.000 BTUs": 250.0,
+        "18.000 BTUs": 250.0,
+        "24.000 BTUs": 250.0
+      },
+      "cobranca_por_ponto": true,
+      "preco_por_ponto": 250.0
     }
   },
   "materiais": {
