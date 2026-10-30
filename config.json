@@ -77,14 +77,14 @@
     "Instalação Infraestrutura": {
       "ativo": true,
       "mostrar_cliente": true,
-      "descricao": "",
+      "descricao": "Valor referente mão de obra, abrir canaletas e fixação de caixa de passagem e por tubulação de cobre no lugar.\n",
       "precos": {
         "9.000 BTUs": 250.0,
         "12.000 BTUs": 250.0,
         "18.000 BTUs": 250.0,
         "24.000 BTUs": 250.0
       },
-      "cobranca_por_ponto": true,
+      "cobranca_por_ponto": false,
       "preco_por_ponto": 250.0
     }
   },
