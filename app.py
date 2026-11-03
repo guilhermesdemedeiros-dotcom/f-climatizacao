@@ -1367,6 +1367,11 @@ def alterar_status_orcamento(
         orcamento["pagamento_pedido"] = copy.deepcopy(pagamento)
 
     if novo_status == "Faturado / Concluído":
+        # Registra execução na agenda, inclusive quando faturado pela aba Orçamentos.
+        agendamento = orcamento.get("agendamento")
+        if isinstance(agendamento, dict):
+            agendamento["realizado"] = True
+            agendamento.setdefault("realizado_em", agora_status)
         if pagamento is None:
             pagamento = copy.deepcopy(
                 orcamento.get("pagamento_pedido", {})
@@ -2818,67 +2823,182 @@ def descricao_agendamento(registro):
     return ", ".join(nomes[:3]) + ("…" if len(nomes) > 3 else "") if nomes else "Serviço conforme pedido"
 
 
+def servico_ja_realizado(registro):
+    """Venda faturada ou execução explicitamente confirmada."""
+    if registro.get("status") == "Faturado / Concluído":
+        return True
+    return bool((registro.get("agendamento") or {}).get("realizado", False))
+
+
 def agenda_admin(registros, *, compacta=False):
-    """Compromissos atuais e futuros, ordenados por data e horário."""
+    """Agenda operacional: próximos, atrasados, realizados e histórico."""
     agora = datetime.now(FUSO_BRASILIA)
     hoje = agora.date()
-    proximos, pendentes = [], []
+    proximos, atrasados, realizados, sem_data = [], [], [], []
+
     for registro in registros:
-        if registro.get("status") != "Pedido de venda":
+        if registro.get("status") not in ("Pedido de venda", "Faturado / Concluído"):
             continue
         momento = data_hora_agendamento(registro)
         if momento is None:
-            pendentes.append(registro)
-        elif momento.date() >= hoje:
-            proximos.append((momento, registro))
-    proximos.sort(key=lambda par: (par[0], str(par[1].get("numero", ""))))
+            if registro.get("status") == "Pedido de venda":
+                sem_data.append(registro)
+            continue
+        entrada = (momento, registro)
+        if servico_ja_realizado(registro):
+            realizados.append(entrada)
+        elif momento.date() < hoje:
+            atrasados.append(entrada)
+        else:
+            proximos.append(entrada)
 
-    st.markdown("### <span style='color:#fff'>📅 Minha agenda</span>", unsafe_allow_html=True)
-    st.caption("Serviços confirmados • Hoje, amanhã e próximos dias")
-    if pendentes:
-        st.warning(f"{len(pendentes)} pedido(s) antigo(s) sem data ou horário. Abra Orçamentos para agendar.")
+    proximos.sort(key=lambda p: (p[0], str(p[1].get("numero", ""))))
+    atrasados.sort(key=lambda p: p[0], reverse=True)
+    realizados.sort(key=lambda p: p[0], reverse=True)
+
+    st.markdown("### Minha agenda")
+    st.caption("Serviços por data e horário • marque o que já foi executado")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("A fazer", len(proximos))
+    col2.metric("Atrasados", len(atrasados))
+    col3.metric("Realizados", len(realizados))
+
+    if sem_data:
+        st.warning(f"{len(sem_data)} pedido(s) sem agendamento. Abra Orçamentos para informar data e horário.")
 
     grupos = [
         ("HOJE", hoje, "#ff9c35"),
         ("AMANHÃ", hoje + timedelta(days=1), "#65b5ff"),
         ("DEPOIS DE AMANHÃ", hoje + timedelta(days=2), "#8ed3aa"),
     ]
-    vistos = set()
-    for nome_grupo, dia, destaque in grupos:
+    for nome_grupo, dia, cor in grupos:
+        st.markdown(f"<div style='font-size:13px;font-weight:900;color:{cor};margin-top:10px'>{nome_grupo} · {dia.strftime('%d/%m')}</div>", unsafe_allow_html=True)
         itens = [(dt, r) for dt, r in proximos if dt.date() == dia]
-        vistos.update(str(r.get("numero", "")) for _, r in itens)
-        st.markdown(f"<div style='font-size:13px;font-weight:900;color:{destaque};margin-top:10px'>{nome_grupo} · {dia.strftime('%d/%m')}</div>", unsafe_allow_html=True)
         if not itens:
             st.caption("Sem serviços agendados.")
-        for dt, r in itens:
-            exibir_compromisso(dt, r)
+        for dt, registro in itens:
+            exibir_compromisso(dt, registro)
 
-    restantes = [(dt, r) for dt, r in proximos if str(r.get("numero", "")) not in vistos]
-    if restantes:
-        with st.expander(f"Próximos agendamentos ({len(restantes)})", expanded=not compacta):
-            for dt, r in restantes:
-                exibir_compromisso(dt, r)
-    if not proximos and not pendentes:
-        st.caption("Nenhum serviço pendente agendado.")
+    futuros = [(dt, r) for dt, r in proximos if dt.date() > hoje + timedelta(days=2)]
+    with st.expander(f"Próximos dias ({len(futuros)})", expanded=not compacta and bool(futuros)):
+        if not futuros:
+            st.caption("Sem outros agendamentos.")
+        for dt, registro in futuros:
+            exibir_compromisso(dt, registro)
+
+    # Preservar datas antigas: não desaparecer da agenda quando o dia passa.
+    with st.expander(f"Pendentes de datas anteriores ({len(atrasados)})", expanded=bool(atrasados)):
+        if not atrasados:
+            st.caption("Nenhum serviço antigo pendente.")
+        for dt, registro in atrasados:
+            exibir_compromisso(dt, registro, atrasado=True)
+
+    with st.expander(f"Histórico de serviços realizados ({len(realizados)})", expanded=False):
+        if not realizados:
+            st.caption("Nenhum serviço realizado registrado.")
+        for dt, registro in realizados:
+            exibir_compromisso(dt, registro, realizado=True)
 
 
-def exibir_compromisso(dt, registro):
+@st.dialog("Confirmar serviço realizado")
+def confirmar_servico_realizado(numero):
+    registros = carregar_orcamentos()
+    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
+    if registro is None or registro.get("status") != "Pedido de venda":
+        st.warning("Pedido não disponível para marcar como realizado.")
+        return
+    st.write(f"Pedido **#{numero}** · **{registro.get('cliente', {}).get('nome', 'Cliente')}**")
+    st.write(f"Serviço: **{descricao_agendamento(registro)}**")
+    st.info("Marcar como realizado confirma a execução do serviço, mas NÃO fatura a venda. Você poderá concluir a venda depois.")
+    a, b = st.columns(2)
+    with a:
+        if st.button("Cancelar", use_container_width=True, key=f"cancel_exec_{numero}"):
+            st.rerun()
+    with b:
+        if st.button("Sim, serviço realizado", type="primary", use_container_width=True, key=f"ok_exec_{numero}"):
+            ag = registro.setdefault("agendamento", {})
+            ag["realizado"] = True
+            ag["realizado_em"] = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M")
+            registro["atualizado_em"] = ag["realizado_em"]
+            try:
+                salvar_orcamentos(registros)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível salvar a execução: {e}")
+
+
+@st.dialog("Concluir venda do serviço")
+def confirmar_faturamento_agenda(numero):
+    registros = carregar_orcamentos()
+    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
+    if registro is None or registro.get("status") != "Pedido de venda":
+        st.warning("Pedido não disponível para conclusão.")
+        return
+    st.write(f"Pedido **#{numero}** · **{registro.get('cliente', {}).get('nome', 'Cliente')}**")
+    st.caption("Ao confirmar, o pedido passará para Vendas concluídas e será incluído na Central de Faturamento.")
+    pagamento = registro.get("pagamento_pedido") or {}
+    forma_inicial = pagamento.get("forma", FORMAS_PAGAMENTO[0])
+    if forma_inicial not in FORMAS_PAGAMENTO:
+        forma_inicial = FORMAS_PAGAMENTO[0]
+    forma = st.selectbox("Forma de pagamento", FORMAS_PAGAMENTO, index=FORMAS_PAGAMENTO.index(forma_inicial), key=f"fat_ag_forma_{numero}")
+    parcelas = 1
+    if pagamento_exige_parcelas(forma):
+        parcelas = st.number_input("Parcelas", min_value=2, max_value=60, value=max(2, min(60, int(pagamento.get('parcelas', 2) or 2))), key=f"fat_ag_parcelas_{numero}")
+    obs = st.text_input("Observação do pagamento", value=pagamento.get("observacao", ""), key=f"fat_ag_obs_{numero}")
+    a, b = st.columns(2)
+    with a:
+        if st.button("Cancelar", use_container_width=True, key=f"cancel_fat_ag_{numero}"):
+            st.rerun()
+    with b:
+        if st.button("Confirmar conclusão", type="primary", use_container_width=True, key=f"ok_fat_ag_{numero}"):
+            if len(registro.get("opcoes_equipamentos", [])) > 1:
+                st.error("Escolha somente uma opção de equipamento antes de concluir a venda na aba Orçamentos.")
+                return
+            agora_texto = datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M")
+            ag = registro.setdefault("agendamento", {})
+            ag["realizado"] = True
+            ag.setdefault("realizado_em", agora_texto)
+            try:
+                alterar_status_orcamento(registros, registro, "Faturado / Concluído", carregar_financeiro(), pagamento={"forma": forma, "parcelas": int(parcelas), "observacao": obs.strip()})
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível concluir a venda: {e}")
+
+
+def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False):
     from html import escape
     nome = escape(str(registro.get("cliente", {}).get("nome", "Cliente")))
     ag = registro.get("agendamento") or {}
     cidade = registro.get("cliente", {}).get("cidade", "")
     local = escape(str(ag.get("local", "") or cidade or "Local não informado"))
     servico = escape(descricao_agendamento(registro))
-    numero = escape(str(registro.get("numero", "")).zfill(4))
+    numero = str(registro.get("numero", "")).zfill(4)
+    numero_html = escape(numero)
+    cor = "#35c584" if realizado else "#ff7770" if atrasado else "#ff821d"
+    situacao = "REALIZADO" if realizado else "PENDENTE · DATA PASSADA" if atrasado else "AGENDADO"
     st.markdown(
-        f"<div style='margin:6px 0 10px;padding:12px 14px;border:1px solid #25466e;"
-        f"border-left:4px solid #ff821d;border-radius:13px;background:#101a2a'>"
-        f"<div style='font-weight:850;color:#fff;font-size:15px'>"
-        f"{dt.strftime('%d/%m')} · {dt.strftime('%H:%M')} — {nome}</div>"
+        f"<div style='margin:6px 0 5px;padding:12px 14px;border:1px solid #25466e;"
+        f"border-left:4px solid {cor};border-radius:13px;background:#101a2a'>"
+        f"<div style='font-weight:850;color:#fff;font-size:15px'>{dt.strftime('%d/%m/%Y')} · {dt.strftime('%H:%M')} — {nome}</div>"
         f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico}</div>"
-        f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero}</div>"
+        f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero_html}</div>"
+        f"<div style='font-size:11px;font-weight:800;color:{cor};margin-top:6px'>{situacao}</div>"
         f"</div>", unsafe_allow_html=True,
     )
+    if registro.get("status") == "Pedido de venda":
+        if realizado:
+            if st.button("Concluir venda", key=f"agenda_faturar_{numero}", use_container_width=True):
+                confirmar_faturamento_agenda(numero)
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✓ Serviço realizado", key=f"agenda_realizar_{numero}", use_container_width=True):
+                    confirmar_servico_realizado(numero)
+            with c2:
+                if st.button("Concluir venda", key=f"agenda_faturar_{numero}", use_container_width=True):
+                    confirmar_faturamento_agenda(numero)
+    elif realizado:
+        st.caption("Venda concluída · registro mantido no histórico")
 
 
 @st.dialog("Confirmar alteração do pedido")
