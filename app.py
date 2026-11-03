@@ -665,20 +665,24 @@ def migrar_config(dados):
     return dados
 
 
-def carregar_config():
-    # Alterações do administrador são gravadas por API no GitHub. A cópia
-    # local do deploy pode ficar antiga; priorize a fonte persistida.
+def carregar_config_local():
+    """Configuração apenas para exibir o login, sem consulta remota."""
     try:
-        remoto, _ = github_get_file_cache(CONFIG_REPO, CONFIG_FILE)
-        if remoto is not None:
-            return migrar_config(json.loads(remoto))
-    except Exception:
-        pass
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return migrar_config(json.load(f))
+        with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
+            return migrar_config(json.load(arquivo))
     except Exception:
         return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def carregar_config():
+    # Dados do ADM vêm do GitHub; o cache é invalidado após gravações.
+    try:
+        remoto = github_get_json_cache(CONFIG_REPO, CONFIG_FILE)
+        if isinstance(remoto, dict):
+            return migrar_config(remoto)
+    except Exception:
+        pass
+    return carregar_config_local()
 
 
 
@@ -938,6 +942,17 @@ def github_get_file_cache(repo, path):
     return github_get_file(repo, path)
 
 
+@st.cache_data(ttl=25, max_entries=32, show_spinner=False)
+def github_get_json_cache(repo, path):
+    """Evita repetir base64/JSON parsing a cada clique ou troca de tela.
+
+    O Streamlit devolve uma cópia independente do cache, portanto alterações
+    de itens no ADM não modificam o objeto em cache inadvertidamente.
+    """
+    conteudo, _ = github_get_file_cache(repo, path)
+    return json.loads(conteudo) if conteudo is not None else None
+
+
 def github_put_file(repo, path, text_content, message, sha=None):
     url = f"https://api.github.com/repos/{OWNER}/{repo}/contents/{quote(path)}"
     payload = {
@@ -951,11 +966,18 @@ def github_put_file(repo, path, text_content, message, sha=None):
     # Invalida somente após a API confirmar o salvamento. A próxima leitura
     # traz valores atualizados, inclusive em outras telas e no painel inicial.
     github_get_file_cache.clear()
+    github_get_json_cache.clear()
     return resultado
 
 
-# Carrega configuração depois de definir acesso à API GitHub.
-config = carregar_config()
+# O login não precisa aguardar a rede. Após autenticação/restauração de
+# sessão, o rerun carrega imediatamente o catálogo persistido do GitHub.
+# Em qualquer sessão já autenticada, a configuração continua vindo do GitHub.
+config = (
+    carregar_config()
+    if st.session_state.get("admin_logado", False)
+    else carregar_config_local()
+)
 
 
 def salvar_config():
@@ -979,10 +1001,7 @@ def salvar_config():
 
 def carregar_orcamentos():
     try:
-        content, _ = github_get_file_cache(DATA_REPO, BUDGETS_FILE)
-        if content is None:
-            return []
-        dados = json.loads(content)
+        dados = github_get_json_cache(DATA_REPO, BUDGETS_FILE)
         return dados if isinstance(dados, list) else []
     except Exception as e:
         st.error(f"Não foi possível carregar os orçamentos: {e}")
@@ -1052,15 +1071,7 @@ def extrair_mes_ano(data_texto):
 
 def carregar_financeiro():
     try:
-        content, _ = github_get_file_cache(DATA_REPO, FINANCE_FILE)
-        if content is None:
-            return {
-                "custos_materiais": {},
-                "custos_equipamentos": {},
-                "movimentacoes": {},
-            }
-
-        dados = json.loads(content)
+        dados = github_get_json_cache(DATA_REPO, FINANCE_FILE)
 
         if not isinstance(dados, dict):
             dados = {}
@@ -1631,14 +1642,16 @@ def logo_path():
     return None
 
 
+@st.cache_data(show_spinner=False)
 def logo_data_uri():
+    """Evita reler e converter a imagem em base64 em cada rerun."""
     path = logo_path()
     if not path:
         return ""
     try:
-        mime = "image/png"
-        data = base64.b64encode(open(path, "rb").read()).decode("ascii")
-        return f"data:{mime};base64,{data}"
+        with open(path, "rb") as arquivo:
+            dados = base64.b64encode(arquivo.read()).decode("ascii")
+        return f"data:image/png;base64,{dados}"
     except Exception:
         return ""
 
@@ -2903,10 +2916,9 @@ DIAS_SEMANA_AGENDA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado
 
 
 def carregar_disponibilidade_agenda():
-    conteudo, _ = github_get_file_cache(DATA_REPO, AGENDA_FILE)
-    if conteudo is None:
+    dados = github_get_json_cache(DATA_REPO, AGENDA_FILE)
+    if dados is None:
         return copy.deepcopy(AGENDA_DEFAULT)
-    dados = json.loads(conteudo)
     if not isinstance(dados, dict):
         raise ValueError("Configuração privada da agenda inválida.")
     base = copy.deepcopy(AGENDA_DEFAULT)
@@ -5961,8 +5973,9 @@ def aba_gestao_comercial():
     c3.metric("Concluídas", totais["Faturado / Concluído"])
     financeiro = carregar_financeiro()
     previstos = [r for r in registros if r.get("status") == "Pedido de venda"]
-    receita_prevista = sum(estimar_resultado_pedido(r, financeiro)["receita"] for r in previstos)
-    custo_previsto = sum(estimar_resultado_pedido(r, financeiro)["custo"] for r in previstos)
+    previsoes = [estimar_resultado_pedido(r, financeiro) for r in previstos]
+    receita_prevista = sum(resultado["receita"] for resultado in previsoes)
+    custo_previsto = sum(resultado["custo"] for resultado in previsoes)
     concluidos = [r for r in registros if r.get("status") == "Faturado / Concluído"]
     receita_realizada = sum(total_orcamento(r) for r in concluidos if len(r.get("opcoes_equipamentos", [])) <= 1)
     st.markdown("#### Resumo financeiro")
