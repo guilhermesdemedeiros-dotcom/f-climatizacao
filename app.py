@@ -2896,6 +2896,7 @@ AGENDA_DEFAULT = {
     },
     "excecoes": {},
     "duracao_servicos": {},
+    "semanas_turnos": {},
     "passo_minutos": 30,
 }
 DIAS_SEMANA_AGENDA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -2987,6 +2988,67 @@ def duracao_agendamento(registro, disponibilidade, quantidade=None, minutos_unit
     return max(30, int(minutos_unitarios)*max(1, int(quantidade)))
 
 
+# Janelas que o prestador tem disponíveis no turno inverso ao trabalho principal.
+JANELAS_TURNO = {
+    'Primeiro turno': [['18:00', '21:30']],
+    'Segundo turno': [['08:00', '11:30']],
+}
+
+
+def segunda_da_semana(dia):
+    return dia - timedelta(days=dia.weekday())
+
+
+def faixas_semana_disponiveis(dia, disponibilidade):
+    """Semanas configuráveis individualmente, inclusive com semanas futuras diferentes."""
+    semanas = disponibilidade.get('semanas_turnos', {})
+    if not semanas:
+        # Preserva a agenda anterior até o primeiro planejamento semanal.
+        return disponibilidade.get('janelas_semanais', {}).get(str(dia.weekday()), [])
+    plano = semanas.get(segunda_da_semana(dia).isoformat())
+    if plano is None:
+        # Semana ainda não configurada: não inventar disponibilidade.
+        return []
+    overrides = plano.get('dias_especiais', {})
+    if dia.isoformat() in overrides:
+        return overrides[dia.isoformat()]
+    if dia.weekday() == 6:
+        return []
+    if dia.weekday() == 5:
+        return plano.get('sabado', [])
+    return plano.get('janelas', JANELAS_TURNO.get(plano.get('turno'), []))
+
+
+def opcoes_hora_agenda():
+    return [formatar_minutos(m) for m in range(0, 24 * 60, 30)] + ['23:59']
+
+
+def selecionar_faixa_agenda(prefixo, *, inicio='08:00', fim='11:30'):
+    """Seletores sem exigir texto com horários em formato especial."""
+    opcoes = opcoes_hora_agenda()
+    inicio = inicio if inicio in opcoes else '08:00'
+    fim = fim if fim in opcoes else '11:30'
+    coluna_ini, coluna_fim = st.columns(2, gap='small')
+    with coluna_ini:
+        hi = st.selectbox('Início', opcoes, index=opcoes.index(inicio), key=f'{prefixo}_ini')
+    with coluna_fim:
+        hf = st.selectbox('Fim', opcoes, index=opcoes.index(fim), key=f'{prefixo}_fim')
+    return [hi, hf]
+
+
+def normalizar_faixas_agenda(janelas):
+    validadas=[]
+    for ini, fim in janelas:
+        if minutos_horario(ini) >= minutos_horario(fim):
+            raise ValueError('O fim de cada intervalo deve ser posterior ao início.')
+        validadas.append([ini, fim])
+    validadas.sort(key=lambda v: v[0])
+    for a,b in zip(validadas, validadas[1:]):
+        if minutos_horario(a[1]) > minutos_horario(b[0]):
+            raise ValueError('Os horários não podem se sobrepor.')
+    return validadas
+
+
 def disponibilidade_para_dia(dia, disponibilidade, instalacao=False):
     chave = dia.isoformat()
     excecao = disponibilidade.get('excecoes', {}).get(chave, {})
@@ -2994,7 +3056,7 @@ def disponibilidade_para_dia(dia, disponibilidade, instalacao=False):
         return []
     if instalacao and excecao.get('tipo') == 'chuva':
         return []
-    janelas = disponibilidade.get('janelas_semanais', {}).get(str(dia.weekday()), [])
+    janelas = faixas_semana_disponiveis(dia, disponibilidade)
     if excecao.get('tipo') == 'horarios':
         janelas = excecao.get('janelas', [])
     return janelas
@@ -3083,27 +3145,104 @@ def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefix
 
 def painel_configuracao_agenda():
     with st.expander('Disponibilidade, turnos e dias bloqueados', expanded=False):
-        st.caption('Horários de trabalho disponíveis. Ajuste por dia ou marque exceções (turno, folga e chuva).')
+        st.caption('Planeje esta semana e as próximas. Segunda a sexta seguem o turno escolhido; sábado é configurado separadamente.')
         try:
             disponibilidade = carregar_disponibilidade_agenda()
         except Exception as e:
             st.error(f'Não foi possível carregar a disponibilidade privada: {e}')
             return
-        with st.form('agenda_turnos_form'):
-            novos={}
-            for indice, nome in enumerate(DIAS_SEMANA_AGENDA):
-                atual=disponibilidade.get('janelas_semanais',{}).get(str(indice),[])
-                novos[str(indice)] = st.text_input(nome, value=texto_janelas(atual),
-                                      placeholder='08:00-12:00, 17:00-22:00')
-            enviar=st.form_submit_button('Salvar meus turnos', use_container_width=True)
-        if enviar:
+
+        hoje = datetime.now(FUSO_BRASILIA).date()
+        inicio_atual = segunda_da_semana(hoje)
+        # Até 16 semanas adiante; cada semana salva separadamente.
+        semanas = [inicio_atual + timedelta(weeks=i) for i in range(17)]
+        semana = st.selectbox(
+            'Semana que deseja configurar', semanas,
+            format_func=lambda d: (
+                ('Esta semana' if d == inicio_atual else
+                 'Próxima semana' if d == inicio_atual + timedelta(weeks=1) else
+                 f'Semana de {d.strftime("%d/%m")}')
+                + f' · {d.strftime("%d/%m")} a {(d + timedelta(days=4)).strftime("%d/%m/%Y")}'
+                + (' · configurada' if d.isoformat() in disponibilidade.get('semanas_turnos', {}) else '')
+            ),
+            key='agenda_semana_escolhida',
+        )
+        chave_semana = semana.isoformat()
+        plano_atual = disponibilidade.get('semanas_turnos', {}).get(chave_semana, {})
+        turnos = ['Primeiro turno', 'Segundo turno']
+        atual_turno = plano_atual.get('turno', 'Segundo turno')
+        qtd_salva = len(plano_atual.get('sabado', []))
+        qtd_sab = st.number_input('Faixas disponíveis no sábado (+ para adicionar)',
+            min_value=0, max_value=6, value=qtd_salva, step=1,
+            key=f'qtd_sab_{chave_semana}', help='Zero significa sábado indisponível.')
+        with st.form(f'agenda_semana_form_{chave_semana}'):
+            turno = st.radio(
+                'Turno do trabalho principal (segunda a sexta)', turnos,
+                index=turnos.index(atual_turno) if atual_turno in turnos else 1,
+                horizontal=True, key=f'turno_sem_{chave_semana}',
+            )
+            st.caption('Primeiro turno → disponível à tardinha (18:00–21:30). Segundo turno → disponível pela manhã (08:00–11:30).')
+            personalizar = st.checkbox('Alterar manualmente o horário de segunda a sexta',
+                value=bool(plano_atual.get('manual', False)), key=f'turno_man_{chave_semana}')
+            horario_manual = None
+            if personalizar:
+                atual_janela = (plano_atual.get('janelas') or JANELAS_TURNO[atual_turno])[0]
+                horario_manual = selecionar_faixa_agenda(f'sem_man_{chave_semana}',
+                    inicio=atual_janela[0], fim=atual_janela[1])
+            st.markdown('**Sábado — horários opcionais**')
+            sabado=[]
+            for indice in range(int(qtd_sab)):
+                st.caption(f'Horário {indice+1} do sábado')
+                antigo = plano_atual.get('sabado', [])
+                janela = antigo[indice] if indice < len(antigo) else ['08:00','11:30']
+                sabado.append(selecionar_faixa_agenda(f'sab_{chave_semana}_{indice}',
+                    inicio=janela[0], fim=janela[1]))
+            salvar_semana = st.form_submit_button('Salvar horários desta semana',
+                type='primary', use_container_width=True)
+        if salvar_semana:
             try:
-                disponibilidade['janelas_semanais']={str(i): janelas_de_texto(v) for i,v in novos.items()}
+                janelas_turno = normalizar_faixas_agenda(
+                    [horario_manual] if personalizar else JANELAS_TURNO[turno])
+                sabado = normalizar_faixas_agenda(sabado)
+                disponibilidade.setdefault('semanas_turnos', {})[chave_semana] = {
+                    'turno': turno, 'manual': bool(personalizar),
+                    'janelas': janelas_turno, 'sabado': sabado,
+                    'dias_especiais': copy.deepcopy(plano_atual.get('dias_especiais', {})),
+                }
                 salvar_disponibilidade_agenda(disponibilidade)
-                st.success('Turnos atualizados.')
+                st.success('Semana configurada. Os horários livres já usam essa programação.')
                 st.rerun()
             except Exception as e:
-                st.error(f'Erro ao salvar turnos: {e}')
+                st.error(f'Não foi possível salvar os horários: {e}')
+        st.caption('Semanas futuras ainda não configuradas não oferecem horários automaticamente.')
+        st.markdown('**Exceção manual de um dia desta semana**')
+        with st.form(f'excecao_semana_form_{chave_semana}'):
+            dia_personalizado = st.selectbox('Dia', [semana + timedelta(days=i) for i in range(7)],
+                format_func=lambda d: f'{DIAS_SEMANA_AGENDA[d.weekday()]} · {d.strftime("%d/%m")}',
+                key=f'esc_dia_{chave_semana}')
+            tipo_dia = st.radio('Disponibilidade', ['Horário personalizado', 'Dia indisponível', 'Voltar ao horário da semana'],
+                key=f'esc_tipo_{chave_semana}')
+            faixa_dia = selecionar_faixa_agenda(f'exc_{chave_semana}') if tipo_dia == 'Horário personalizado' else None
+            confirmar_dia = st.form_submit_button('Salvar ajuste deste dia', use_container_width=True)
+        if confirmar_dia:
+            try:
+                plano = disponibilidade.setdefault('semanas_turnos', {}).get(chave_semana)
+                if plano is None:
+                    st.warning('Primeiro salve o turno desta semana.')
+                else:
+                    especificos = plano.setdefault('dias_especiais', {})
+                    chave_dia = dia_personalizado.isoformat()
+                    if tipo_dia == 'Voltar ao horário da semana':
+                        especificos.pop(chave_dia, None)
+                    elif tipo_dia == 'Dia indisponível':
+                        especificos[chave_dia] = []
+                    else:
+                        especificos[chave_dia] = normalizar_faixas_agenda([faixa_dia])
+                    salvar_disponibilidade_agenda(disponibilidade)
+                    st.success('Ajuste do dia salvo.')
+                    st.rerun()
+            except Exception as e:
+                st.error(f'Não foi possível salvar o ajuste: {e}')
         st.divider()
         st.markdown('**Tempo padrão de cada serviço**')
         st.caption('Configure a duração estimada por unidade. Higienização usa 60 minutos por aparelho quando não houver personalização.')
@@ -3131,8 +3270,7 @@ def painel_configuracao_agenda():
         tipo=st.selectbox('Regra para esta data',
                ['Indisponível para todos os serviços', 'Chuva: bloquear apenas instalações', 'Horários especiais', 'Remover bloqueio'],
                key='agenda_exc_tipo')
-        faixas=st.text_input('Horários disponíveis nessa data', placeholder='17:00-22:00',
-                            key='agenda_exc_faixas') if tipo=='Horários especiais' else ''
+        faixa_especial = selecionar_faixa_agenda('agenda_excecao_data') if tipo=='Horários especiais' else None
         nota=st.text_input('Motivo (opcional)', key='agenda_exc_motivo')
         if st.button('Salvar bloqueio / exceção', key='agenda_exc_salvar'):
             try:
@@ -3143,7 +3281,7 @@ def painel_configuracao_agenda():
                             'Chuva: bloquear apenas instalações':'chuva','Horários especiais':'horarios'}[tipo]
                     excecao={'tipo':regra,'motivo':nota.strip()}
                     if regra=='horarios':
-                        excecao['janelas']=janelas_de_texto(faixas)
+                        excecao['janelas']=normalizar_faixas_agenda([faixa_especial])
                     disponibilidade.setdefault('excecoes',{})[d.isoformat()]=excecao
                 # Não remove agendamentos existentes. A agenda destaca os afetados
                 # para reagendamento com nova data/hora e preserva o histórico.
@@ -5820,7 +5958,7 @@ def painel_semana_admin(registros):
     st.markdown("""
     <div class="fc-home-heading">
       <div class="fc-home-eyebrow">PAINEL OPERACIONAL</div>
-      <div class="fc-home-title">📅 Minha semana</div>
+      <div class="fc-home-title">Minha semana</div>
       <div class="fc-home-sub">Próximos 7 dias • serviços confirmados e ainda não realizados</div>
     </div>
     """, unsafe_allow_html=True)
@@ -5841,7 +5979,7 @@ def painel_semana_admin(registros):
                 f'<div class="fc-home-event-time">{momento.strftime("%H:%M")}</div>'
                 '<div class="fc-home-event-info">'
                 f'<strong>{nome}</strong><span>{servico}</span>'
-                f'<small>📍 {local} · Pedido #{numero}</small>'
+                f'<small>{local} · Pedido #{numero}</small>'
                 '</div></div>'
             )
         conteudo = "".join(itens_html) if itens_html else '<div class="fc-home-empty">Nenhum serviço agendado</div>'
@@ -5859,7 +5997,7 @@ def painel_semana_admin(registros):
             f"{atrasados} serviço(s) atrasado(s) · {sem_data} pedido(s) sem agendamento. "
             "Consulte a Agenda para resolver."
         )
-    if st.button("📅 Abrir agenda completa e histórico", key="fc_home_abrir_agenda", use_container_width=True, type="primary"):
+    if st.button("Abrir agenda completa e histórico", icon=":material/calendar_month:", key="fc_home_abrir_agenda", use_container_width=True, type="primary"):
         st.session_state["admin_view"] = "agenda"
         st.rerun()
 
@@ -5883,7 +6021,7 @@ def estilo_dashboard_admin():
 .fc-home-event-info span {color:#b6c8df;font-size:11px;}
 .fc-home-event-info small {color:#94a6bc;font-size:10px;}
 .fc-home-grid-title {font-size:17px;font-weight:850;color:#f1f8ff;margin:20px 0 10px;}
-div[class*="st-key-fc_atalho_"] button {min-height:86px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:12px 7px !important;font-size:13px !important;font-weight:750 !important;white-space:normal !important;line-height:1.45 !important;}
+div[class*="st-key-fc_atalho_"] button {min-height:86px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:12px 7px !important;font-size:12px !important;font-weight:750 !important;white-space:normal !important;line-height:1.35 !important;}
 div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
 </style>
     """, unsafe_allow_html=True)
@@ -5891,27 +6029,28 @@ div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;ba
 
 def atalhos_inicio_admin():
     atalhos = [
-        ("novo", "📝 Novo orçamento"),
-        ("agenda", "📅 Agenda"),
-        ("orcamentos", "📄 Orçamentos"),
-        ("pedidos", "📋 Pedidos de venda"),
-        ("vendas", "✅ Vendas concluídas"),
-        ("realizados", "🛠️ Serviços realizados"),
-        ("gestao", "📊 Gestão comercial"),
-        ("financeiro", "📈 Central financeira"),
-        ("servicos", "🔧 Serviços"),
-        ("materiais", "📦 Materiais"),
-        ("aparelhos", "❄️ Aparelhos"),
-        ("regras", "⚙️ Regras"),
-        ("empresa", "🏢 Empresa"),
+        ('novo', 'Novo orçamento', ':material/note_add:'),
+        ('agenda', 'Agenda', ':material/calendar_month:'),
+        ('orcamentos', 'Orçamentos', ':material/description:'),
+        ('pedidos', 'Pedidos de venda', ':material/assignment:'),
+        ('vendas', 'Vendas concluídas', ':material/check_circle:'),
+        ('realizados', 'Serviços realizados', ':material/handyman:'),
+        ('gestao', 'Gestão comercial', ':material/monitoring:'),
+        ('financeiro', 'Central financeira', ':material/bar_chart:'),
+        ('servicos', 'Serviços', ':material/build:'),
+        ('materiais', 'Materiais', ':material/inventory_2:'),
+        ('aparelhos', 'Aparelhos', ':material/ac_unit:'),
+        ('regras', 'Regras', ':material/tune:'),
+        ('empresa', 'Empresa', ':material/business:'),
     ]
     st.markdown('<div class="fc-home-grid-title">Acessos rápidos</div>', unsafe_allow_html=True)
     for pos in range(0, len(atalhos), 2):
-        colunas = st.columns(2, gap="small")
-        for coluna, (destino, rotulo) in zip(colunas, atalhos[pos:pos+2]):
+        colunas = st.columns(2, gap='small')
+        for coluna, (destino, rotulo, icone) in zip(colunas, atalhos[pos:pos+2]):
             with coluna:
-                if st.button(rotulo, use_container_width=True, key=f"fc_atalho_{destino}"):
-                    st.session_state["admin_view"] = destino
+                if st.button(rotulo, icon=icone, use_container_width=True,
+                             key=f'fc_atalho_{destino}'):
+                    st.session_state['admin_view'] = destino
                     st.rerun()
 
 
