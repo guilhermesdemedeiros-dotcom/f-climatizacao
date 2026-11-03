@@ -5962,8 +5962,49 @@ def estilo_dashboard_admin():
 div[class*="st-key-fc_atalho_"] button {min-height:54px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:7px 5px !important;font-size:11px !important;font-weight:750 !important;white-space:normal !important;line-height:1.2 !important;}
 div[class*="st-key-fc_atalho_"] button span[data-testid="stIconMaterial"] {font-size:18px !important;}
 /* Impede que as duas colunas de atalhos virem linhas individuais no celular. */
-.st-key-fc_home_grid [data-testid="stHorizontalBlock"] {flex-wrap:nowrap !important;gap:8px !important;}
-.st-key-fc_home_grid [data-testid="column"] {min-width:0 !important;flex:1 1 0 !important;width:0 !important;}
+/* Grade responsiva: neutraliza os mínimos de largura padrão das colunas Streamlit.
+   O seletor correto é stColumn (não column). Mantém as 2 colunas dentro do viewport. */
+.st-key-fc_home_grid [data-testid="stHorizontalBlock"] {
+  display:flex !important;
+  flex-flow:row nowrap !important;
+  gap:8px !important;
+  width:100% !important;
+  max-width:100% !important;
+  min-width:0 !important;
+  box-sizing:border-box !important;
+}
+.st-key-fc_home_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+  flex:1 1 0% !important;
+  width:calc(50% - 4px) !important;
+  min-width:0 !important;
+  max-width:calc(50% - 4px) !important;
+  box-sizing:border-box !important;
+}
+.st-key-fc_home_grid [data-testid="stColumn"] > div,
+.st-key-fc_home_grid [data-testid="stColumn"] [data-testid="stVerticalBlock"],
+.st-key-fc_home_grid [data-testid="stColumn"] [data-testid="stButton"] {
+  min-width:0 !important;
+  width:100% !important;
+  max-width:100% !important;
+}
+.st-key-fc_home_grid [data-testid="stColumn"] button {
+  width:100% !important;
+  max-width:100% !important;
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:clip !important;
+  display:flex !important;
+  justify-content:center !important;
+  align-items:center !important;
+  gap:5px !important;
+}
+.st-key-fc_home_grid [data-testid="stColumn"] button p {
+  overflow-wrap:anywhere !important;
+  word-break:normal !important;
+  white-space:normal !important;
+  font-size:clamp(10px, 2.8vw, 12px) !important;
+  line-height:1.2 !important;
+}
 @media(max-width:480px) {div[class*="st-key-fc_atalho_"] button {font-size:10.5px !important;padding:5px 3px !important;min-height:52px !important;}}
 div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
 </style>
