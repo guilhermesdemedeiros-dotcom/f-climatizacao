@@ -669,7 +669,7 @@ def carregar_config():
     # Alterações do administrador são gravadas por API no GitHub. A cópia
     # local do deploy pode ficar antiga; priorize a fonte persistida.
     try:
-        remoto, _ = github_get_file(CONFIG_REPO, CONFIG_FILE)
+        remoto, _ = github_get_file_cache(CONFIG_REPO, CONFIG_FILE)
         if remoto is not None:
             return migrar_config(json.loads(remoto))
     except Exception:
@@ -906,7 +906,7 @@ def github_request(url, method="GET", data=None):
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
     try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -930,6 +930,14 @@ def github_get_file(repo, path):
         raise
 
 
+# Cache curto em memória: evita múltiplas consultas HTTPS ao GitHub a cada
+# interação do Streamlit. O resultado é copiado pelo Streamlit, impedindo que
+# uma edição em uma tela altere acidentalmente o conteúdo no cache.
+@st.cache_data(ttl=25, max_entries=32, show_spinner=False)
+def github_get_file_cache(repo, path):
+    return github_get_file(repo, path)
+
+
 def github_put_file(repo, path, text_content, message, sha=None):
     url = f"https://api.github.com/repos/{OWNER}/{repo}/contents/{quote(path)}"
     payload = {
@@ -939,7 +947,11 @@ def github_put_file(repo, path, text_content, message, sha=None):
     }
     if sha:
         payload["sha"] = sha
-    return github_request(url, method="PUT", data=payload)
+    resultado = github_request(url, method="PUT", data=payload)
+    # Invalida somente após a API confirmar o salvamento. A próxima leitura
+    # traz valores atualizados, inclusive em outras telas e no painel inicial.
+    github_get_file_cache.clear()
+    return resultado
 
 
 # Carrega configuração depois de definir acesso à API GitHub.
@@ -967,7 +979,7 @@ def salvar_config():
 
 def carregar_orcamentos():
     try:
-        content, _ = github_get_file(DATA_REPO, BUDGETS_FILE)
+        content, _ = github_get_file_cache(DATA_REPO, BUDGETS_FILE)
         if content is None:
             return []
         dados = json.loads(content)
@@ -1040,7 +1052,7 @@ def extrair_mes_ano(data_texto):
 
 def carregar_financeiro():
     try:
-        content, _ = github_get_file(DATA_REPO, FINANCE_FILE)
+        content, _ = github_get_file_cache(DATA_REPO, FINANCE_FILE)
         if content is None:
             return {
                 "custos_materiais": {},
@@ -1516,7 +1528,7 @@ def sincronizar_central_faturamento(orcamentos, financeiro):
 
 def carregar_meta_orcamentos():
     try:
-        content, _ = github_get_file(DATA_REPO, BUDGET_META_FILE)
+        content, _ = github_get_file_cache(DATA_REPO, BUDGET_META_FILE)
         if content is None:
             return {"ultimo_numero": 0}
         dados = json.loads(content)
@@ -2883,8 +2895,6 @@ AGENDA_DEFAULT = {
         for i in range(7)
     },
     "excecoes": {},
-    "emprego_por_data": {},
-    "modo_emprego_ativo": True,
     "duracao_servicos": {},
     "passo_minutos": 30,
 }
@@ -2892,7 +2902,7 @@ DIAS_SEMANA_AGENDA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado
 
 
 def carregar_disponibilidade_agenda():
-    conteudo, _ = github_get_file(DATA_REPO, AGENDA_FILE)
+    conteudo, _ = github_get_file_cache(DATA_REPO, AGENDA_FILE)
     if conteudo is None:
         return copy.deepcopy(AGENDA_DEFAULT)
     dados = json.loads(conteudo)
@@ -2900,11 +2910,6 @@ def carregar_disponibilidade_agenda():
         raise ValueError("Configuração privada da agenda inválida.")
     base = copy.deepcopy(AGENDA_DEFAULT)
     base.update(dados)
-    # Migração não destrutiva: o horário de atendimento agora é 08h–21h30.
-    # As antigas janelas semanais continuam guardadas no arquivo privado.
-    # O emprego principal é configurado independentemente para cada data.
-    base.setdefault('emprego_por_data', {})
-    base.setdefault('modo_emprego_ativo', True)
     return base
 
 
@@ -2982,37 +2987,6 @@ def duracao_agendamento(registro, disponibilidade, quantidade=None, minutos_unit
     return max(30, int(minutos_unitarios)*max(1, int(quantidade)))
 
 
-def subtrair_faixas_agenda(janelas, bloqueios):
-    """Subtrai faixas ocupadas sem criar horários sobrepostos."""
-    resultado = [(minutos_horario(i), minutos_horario(f)) for i, f in janelas]
-    for bloqueio_inicio, bloqueio_fim in bloqueios:
-        ini_b, fim_b = minutos_horario(bloqueio_inicio), minutos_horario(bloqueio_fim)
-        if ini_b >= fim_b:
-            continue
-        novas = []
-        for ini, fim in resultado:
-            if fim <= ini_b or ini >= fim_b:
-                novas.append((ini, fim))
-            else:
-                if ini < ini_b:
-                    novas.append((ini, ini_b))
-                if fim > fim_b:
-                    novas.append((fim_b, fim))
-        resultado = novas
-    return [[formatar_minutos(i), formatar_minutos(f)] for i, f in resultado if f > i]
-
-
-TURNOS_EMPREGO = {
-    'Folga / não trabalho': [],
-    'Trabalho de manhã (08h–12h)': [['08:00', '12:00']],
-    'Trabalho à tarde (12h–18h)': [['12:00', '18:00']],
-    'Trabalho meio da tarde (13h–16h)': [['13:00', '16:00']],
-    'Trabalho de dia (08h–18h)': [['08:00', '18:00']],
-    'Trabalho à noite (até 22h)': [['11:30', '21:30']],
-    'Personalizar período trabalhado': [],
-}
-
-
 def disponibilidade_para_dia(dia, disponibilidade, instalacao=False):
     chave = dia.isoformat()
     excecao = disponibilidade.get('excecoes', {}).get(chave, {})
@@ -3020,55 +2994,10 @@ def disponibilidade_para_dia(dia, disponibilidade, instalacao=False):
         return []
     if instalacao and excecao.get('tipo') == 'chuva':
         return []
-    if disponibilidade.get('modo_emprego_ativo', True):
-        janelas = [['08:00', '21:30']]
-    else:
-        janelas = disponibilidade.get('janelas_semanais', {}).get(str(dia.weekday()), [])
+    janelas = disponibilidade.get('janelas_semanais', {}).get(str(dia.weekday()), [])
     if excecao.get('tipo') == 'horarios':
         janelas = excecao.get('janelas', [])
-    regra = disponibilidade.get('emprego_por_data', {}).get(chave, {})
-    return subtrair_faixas_agenda(janelas, regra.get('bloqueios', []))
-
-
-def configurar_emprego_dia(disponibilidade, chave_widget):
-    """Configuração privada por data, acessível ao criar/confirmar orçamento."""
-    hoje = datetime.now(FUSO_BRASILIA).date()
-    with (st.container() if chave_widget == 'agenda_painel' else st.expander('Meu emprego principal · escolher horários livres', expanded=False)):
-        if chave_widget == 'agenda_painel':
-            st.markdown('**Meu emprego principal · escolher horários livres**')
-        st.caption('Atendimentos entre 08h e 21h30. Marque o período do seu outro emprego para bloquear apenas esse intervalo. Folga libera o dia, respeitando compromissos existentes.')
-        with st.form(f'{chave_widget}_emprego_form'):
-            dia = st.date_input('Dia que deseja configurar', value=hoje,
-                                key=f'{chave_widget}_emprego_dia')
-            existente = disponibilidade.get('emprego_por_data', {}).get(dia.isoformat(), {})
-            opcoes = list(TURNOS_EMPREGO)
-            escolha_atual = existente.get('turno', opcoes[0])
-            turno = st.selectbox('Turno do emprego principal', opcoes,
-                                 index=opcoes.index(escolha_atual) if escolha_atual in opcoes else 0,
-                                 key=f'{chave_widget}_emprego_turno')
-            # Sempre visível: em formulários Streamlit, opções internas só atualizam no envio.
-            faixa = st.text_input('Horário personalizado (somente para a última opção)',
-                                  value=texto_janelas(existente.get('bloqueios', []))
-                                  if existente.get('turno') == 'Personalizar período trabalhado' else '',
-                                  placeholder='13:00-17:00 ou 08:00-12:00, 14:00-17:00',
-                                  key=f'{chave_widget}_emprego_custom')
-            personalizar = turno == 'Personalizar período trabalhado'
-            salvar = st.form_submit_button('Salvar turno deste dia', use_container_width=True)
-        if salvar:
-            try:
-                bloqueios = janelas_de_texto(faixa) if personalizar else TURNOS_EMPREGO[turno]
-                if personalizar and not bloqueios:
-                    raise ValueError('Informe pelo menos um período trabalhado.')
-                atualizada = copy.deepcopy(disponibilidade)
-                atualizada['modo_emprego_ativo'] = True
-                atualizada.setdefault('emprego_por_data', {})[dia.isoformat()] = {
-                    'turno': turno, 'bloqueios': bloqueios}
-                salvar_disponibilidade_agenda(atualizada)
-                st.success(f'Turno de {dia.strftime("%d/%m/%Y")} salvo. Horários recalculados.')
-                st.rerun()
-            except Exception as e:
-                st.error(f'Não foi possível salvar o turno: {e}')
-        st.caption('No preset noturno, o atendimento desse dia fica das 08h às 11h30. Para horários diferentes, use Personalizar período trabalhado.')
+    return janelas
 
 
 def horarios_livres_agenda(dia, duracao_min, registros, disponibilidade, registro_id=None,
@@ -3137,7 +3066,6 @@ def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefix
                   value=int(minutos_salvos or padrao), step=15, key=f'{prefixo}_minutos_{numero}')) if alterar else padrao
     duracao = int(qtd) * unidade_min
     st.markdown(f'**Tempo reservado: {duracao//60}h{duracao%60:02d}** · {qtd} unidade(s) × {unidade_min} min')
-    configurar_emprego_dia(disponibilidade, f'{prefixo}_{numero}')
     livres = proximo_dias_disponiveis(registros, disponibilidade, duracao,
                       registro_id=numero, instalacao=eh_instalacao_agenda(registro), dias=28)
     if not livres:
@@ -3155,31 +3083,27 @@ def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefix
 
 def painel_configuracao_agenda():
     with st.expander('Disponibilidade, turnos e dias bloqueados', expanded=False):
-        st.caption('Atendimento das 08h às 21h30, descontando seu emprego principal, compromissos e bloqueios.')
+        st.caption('Horários de trabalho disponíveis. Ajuste por dia ou marque exceções (turno, folga e chuva).')
         try:
             disponibilidade = carregar_disponibilidade_agenda()
         except Exception as e:
             st.error(f'Não foi possível carregar a disponibilidade privada: {e}')
             return
-        configurar_emprego_dia(disponibilidade, 'agenda_painel')
-        with st.container():
-            st.markdown('**Horários semanais antigos (compatibilidade)**')
-            st.caption('Enquanto a agenda por emprego estiver ativa, valem os horários das 08h às 21h30. Estes horários antigos permanecem armazenados para compatibilidade.')
-            with st.form('agenda_turnos_form'):
-                novos={}
-                for indice, nome in enumerate(DIAS_SEMANA_AGENDA):
-                    atual=disponibilidade.get('janelas_semanais',{}).get(str(indice),[])
-                    novos[str(indice)] = st.text_input(nome, value=texto_janelas(atual),
-                                          placeholder='08:00-12:00, 17:00-22:00')
-                enviar=st.form_submit_button('Salvar meus turnos', use_container_width=True)
-            if enviar:
-                try:
-                    disponibilidade['janelas_semanais']={str(i): janelas_de_texto(v) for i,v in novos.items()}
-                    salvar_disponibilidade_agenda(disponibilidade)
-                    st.success('Turnos atualizados.')
-                    st.rerun()
-                except Exception as e:
-                    st.error(f'Erro ao salvar turnos: {e}')
+        with st.form('agenda_turnos_form'):
+            novos={}
+            for indice, nome in enumerate(DIAS_SEMANA_AGENDA):
+                atual=disponibilidade.get('janelas_semanais',{}).get(str(indice),[])
+                novos[str(indice)] = st.text_input(nome, value=texto_janelas(atual),
+                                      placeholder='08:00-12:00, 17:00-22:00')
+            enviar=st.form_submit_button('Salvar meus turnos', use_container_width=True)
+        if enviar:
+            try:
+                disponibilidade['janelas_semanais']={str(i): janelas_de_texto(v) for i,v in novos.items()}
+                salvar_disponibilidade_agenda(disponibilidade)
+                st.success('Turnos atualizados.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Erro ao salvar turnos: {e}')
         st.divider()
         st.markdown('**Tempo padrão de cada serviço**')
         st.caption('Configure a duração estimada por unidade. Higienização usa 60 minutos por aparelho quando não houver personalização.')
@@ -5935,7 +5859,7 @@ def painel_semana_admin(registros):
             f"{atrasados} serviço(s) atrasado(s) · {sem_data} pedido(s) sem agendamento. "
             "Consulte a Agenda para resolver."
         )
-    if st.button("Abrir agenda e histórico", icon=":material/calendar_month:", key="fc_home_abrir_agenda", use_container_width=True, type="primary"):
+    if st.button("📅 Abrir agenda completa e histórico", key="fc_home_abrir_agenda", use_container_width=True, type="primary"):
         st.session_state["admin_view"] = "agenda"
         st.rerun()
 
@@ -5959,85 +5883,36 @@ def estilo_dashboard_admin():
 .fc-home-event-info span {color:#b6c8df;font-size:11px;}
 .fc-home-event-info small {color:#94a6bc;font-size:10px;}
 .fc-home-grid-title {font-size:17px;font-weight:850;color:#f1f8ff;margin:20px 0 10px;}
-div[class*="st-key-fc_atalho_"] button {min-height:54px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:7px 5px !important;font-size:11px !important;font-weight:750 !important;white-space:normal !important;line-height:1.2 !important;}
-div[class*="st-key-fc_atalho_"] button span[data-testid="stIconMaterial"] {font-size:18px !important;}
-/* Impede que as duas colunas de atalhos virem linhas individuais no celular. */
-/* Grade responsiva: neutraliza os mínimos de largura padrão das colunas Streamlit.
-   O seletor correto é stColumn (não column). Mantém as 2 colunas dentro do viewport. */
-.st-key-fc_home_grid [data-testid="stHorizontalBlock"] {
-  display:flex !important;
-  flex-flow:row nowrap !important;
-  gap:8px !important;
-  width:100% !important;
-  max-width:100% !important;
-  min-width:0 !important;
-  box-sizing:border-box !important;
-}
-.st-key-fc_home_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-  flex:1 1 0% !important;
-  width:calc(50% - 4px) !important;
-  min-width:0 !important;
-  max-width:calc(50% - 4px) !important;
-  box-sizing:border-box !important;
-}
-.st-key-fc_home_grid [data-testid="stColumn"] > div,
-.st-key-fc_home_grid [data-testid="stColumn"] [data-testid="stVerticalBlock"],
-.st-key-fc_home_grid [data-testid="stColumn"] [data-testid="stButton"] {
-  min-width:0 !important;
-  width:100% !important;
-  max-width:100% !important;
-}
-.st-key-fc_home_grid [data-testid="stColumn"] button {
-  width:100% !important;
-  max-width:100% !important;
-  min-width:0 !important;
-  overflow:hidden !important;
-  text-overflow:clip !important;
-  display:flex !important;
-  justify-content:center !important;
-  align-items:center !important;
-  gap:5px !important;
-}
-.st-key-fc_home_grid [data-testid="stColumn"] button p {
-  overflow-wrap:anywhere !important;
-  word-break:normal !important;
-  white-space:normal !important;
-  font-size:clamp(10px, 2.8vw, 12px) !important;
-  line-height:1.2 !important;
-}
-@media(max-width:480px) {div[class*="st-key-fc_atalho_"] button {font-size:10.5px !important;padding:5px 3px !important;min-height:52px !important;}}
+div[class*="st-key-fc_atalho_"] button {min-height:86px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:12px 7px !important;font-size:13px !important;font-weight:750 !important;white-space:normal !important;line-height:1.45 !important;}
 div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
 </style>
     """, unsafe_allow_html=True)
 
 
 def atalhos_inicio_admin():
-    # Ícones Material são vetoriais, não emojis coloridos do sistema.
     atalhos = [
-        ('novo', 'Novo orçamento', 'note_add'),
-        ('agenda', 'Agenda', 'calendar_month'),
-        ('orcamentos', 'Orçamentos', 'description'),
-        ('pedidos', 'Pedidos', 'assignment'),
-        ('vendas', 'Vendas concluídas', 'task_alt'),
-        ('realizados', 'Serviços realizados', 'handyman'),
-        ('gestao', 'Gestão comercial', 'monitoring'),
-        ('financeiro', 'Central financeira', 'account_balance_wallet'),
-        ('servicos', 'Serviços', 'build'),
-        ('materiais', 'Materiais', 'inventory_2'),
-        ('aparelhos', 'Aparelhos', 'ac_unit'),
-        ('regras', 'Regras', 'settings'),
-        ('empresa', 'Empresa', 'business'),
+        ("novo", "📝 Novo orçamento"),
+        ("agenda", "📅 Agenda"),
+        ("orcamentos", "📄 Orçamentos"),
+        ("pedidos", "📋 Pedidos de venda"),
+        ("vendas", "✅ Vendas concluídas"),
+        ("realizados", "🛠️ Serviços realizados"),
+        ("gestao", "📊 Gestão comercial"),
+        ("financeiro", "📈 Central financeira"),
+        ("servicos", "🔧 Serviços"),
+        ("materiais", "📦 Materiais"),
+        ("aparelhos", "❄️ Aparelhos"),
+        ("regras", "⚙️ Regras"),
+        ("empresa", "🏢 Empresa"),
     ]
     st.markdown('<div class="fc-home-grid-title">Acessos rápidos</div>', unsafe_allow_html=True)
-    with st.container(key='fc_home_grid'):
-        for pos in range(0, len(atalhos), 2):
-            colunas = st.columns(2, gap='small')
-            for coluna, (destino, rotulo, icone) in zip(colunas, atalhos[pos:pos + 2]):
-                with coluna:
-                    if st.button(rotulo, icon=f':material/{icone}:', use_container_width=True,
-                                 key=f'fc_atalho_{destino}'):
-                        st.session_state['admin_view'] = destino
-                        st.rerun()
+    for pos in range(0, len(atalhos), 2):
+        colunas = st.columns(2, gap="small")
+        for coluna, (destino, rotulo) in zip(colunas, atalhos[pos:pos+2]):
+            with coluna:
+                if st.button(rotulo, use_container_width=True, key=f"fc_atalho_{destino}"):
+                    st.session_state["admin_view"] = destino
+                    st.rerun()
 
 
 def historico_servicos_admin(registros):
@@ -6057,17 +5932,6 @@ def historico_servicos_admin(registros):
     st.caption(f"{len(realizados)} serviço(s) realizado(s)")
     for momento, registro in realizados:
         exibir_compromisso(momento, registro, realizado=True, contexto="historico")
-
-
-def pagina_novo_orcamento_admin():
-    # A rotina do emprego pode ser definida já na abertura do novo orçamento,
-    # antes de selecionar o horário ao confirmar o pedido de venda.
-    try:
-        disponibilidade = carregar_disponibilidade_agenda()
-        configurar_emprego_dia(disponibilidade, 'novo_orcamento')
-    except Exception as e:
-        st.error(f'Não foi possível consultar sua disponibilidade: {e}')
-    pagina_cliente(interno=True)
 
 
 def pagina_admin():
@@ -6119,7 +5983,7 @@ def pagina_admin():
             st.session_state["admin_view"] = "painel"
             st.rerun()
         telas = {
-            "novo": pagina_novo_orcamento_admin,
+            "novo": lambda: pagina_cliente(interno=True),
             "agenda": lambda: agenda_admin(carregar_orcamentos()),
             "orcamentos": lambda: aba_orcamentos("Orçamentos"),
             "pedidos": lambda: aba_orcamentos("Pedidos de venda"),
