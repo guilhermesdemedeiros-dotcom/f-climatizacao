@@ -169,6 +169,56 @@ div[data-testid="stCaptionContainer"] p{color:var(--muted)!important;}
 .section-wrap{margin-top:25px;margin-bottom:11px;}
 .section-title{font-size:20px;font-weight:900;color:#fff;line-height:1.2;}
 .section-sub{font-size:13px;color:#91a3b9;margin-top:4px;line-height:1.4;}
+/* Navegação administrativa compacta com ícones e sinalização azul */
+div[data-testid="stTabs"] [data-baseweb="tab-list"]{
+  display:flex!important;
+  gap:7px!important;
+  overflow-x:auto!important;
+  scrollbar-width:thin;
+  padding:7px 3px 12px!important;
+  border-bottom:1px solid #27384e;
+}
+div[data-testid="stTabs"] button[role="tab"]{
+  background:#111b29!important;
+  border:1px solid #2a3c54!important;
+  border-radius:12px!important;
+  color:#cbdcf0!important;
+  font-size:12px!important;
+  font-weight:750!important;
+  padding:9px 13px!important;
+  min-height:43px!important;
+  white-space:nowrap!important;
+  flex:0 0 auto!important;
+  transition:background .15s ease,border-color .15s ease;
+}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{
+  background:linear-gradient(125deg,#064a93,#0878e8)!important;
+  border-color:#36a7ff!important;
+  color:#fff!important;
+  box-shadow:0 5px 15px rgba(8,120,232,.24);
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{background:transparent!important;}
+.section-wrap-pro{
+  padding:11px 13px;
+  border:1px solid #233c56;
+  border-left:3px solid #0f9fff;
+  border-radius:14px;
+  background:linear-gradient(115deg,rgba(9,51,98,.32),rgba(14,20,30,.5));
+}
+.section-heading-row{display:flex;align-items:center;gap:12px;}
+.section-heading-text{min-width:0;flex:1;}
+.section-icon{
+  display:flex;align-items:center;justify-content:center;
+  flex:0 0 39px;width:39px;height:39px;
+  border:1px solid rgba(58,162,244,.32);
+  border-radius:12px;background:#122c4b;
+  font-size:19px;line-height:1;
+}
+@media(max-width:600px){
+  div[data-testid="stTabs"] button[role="tab"]{font-size:11.5px!important;padding:8px 10px!important;}
+  .section-wrap-pro{padding:10px;}
+  .section-icon{width:35px;height:35px;flex-basis:35px;font-size:17px;}
+}
 .info-card{
   background:linear-gradient(135deg,rgba(8,120,232,.17),rgba(14,20,30,.98));
   border:1px solid rgba(8,120,232,.4);
@@ -1595,7 +1645,7 @@ def cabecalho(admin=False):
         <div>
           <div class="brand-admin">ADMINISTRAÇÃO</div>
           <div class="brand-name">F CLIMATIZAÇÃO</div>
-          <div class="brand-sub">Painel de gestão de cadastros e preços</div>
+          <div class="brand-sub">Agenda, orçamentos e gestão de serviços</div>
         </div>
         """
     else:
@@ -1630,11 +1680,33 @@ def cabecalho(admin=False):
 
 
 def secao(titulo, subtitulo=""):
+    """Cabeçalho visual consistente para áreas operacionais e cadastros."""
+    from html import escape
+    icones = {
+        "Novo orçamento": "📝", "Orçamentos": "📄",
+        "Pedidos de venda": "📋", "Vendas concluídas": "✅",
+        "Agenda": "📅", "Minha agenda": "📅",
+        "Serviços realizados": "🛠️", "Gestão comercial": "📊",
+        "Serviços": "🔧", "Materiais": "📦",
+        "Aparelhos": "❄️", "Regras": "⚙️", "Empresa": "🏢",
+        "Acesso restrito": "🔒", "Aparelho do cliente": "❄️",
+        "Local do serviço": "📍", "Dados do cliente": "👤",
+        "Descontos para este orçamento (%)": "🏷️",
+    }
+    icone = icones.get(str(titulo), "")
+    marcador = (
+        f'<span class="section-icon" aria-hidden="true">{icone}</span>'
+        if icone else ""
+    )
     st.markdown(
         f"""
-        <div class="section-wrap">
-          <div class="section-title">{titulo}</div>
-          <div class="section-sub">{subtitulo}</div>
+        <div class="section-wrap section-wrap-pro">
+          <div class="section-heading-row">{marcador}
+            <div class="section-heading-text">
+              <div class="section-title">{escape(str(titulo))}</div>
+              <div class="section-sub">{escape(str(subtitulo))}</div>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3549,11 +3621,25 @@ def confirmar_reset_base_dialog():
                 st.error(f"Não foi possível reiniciar: {exc}")
 
 
-def aba_orcamentos():
-    secao(
-        "Orçamentos",
-        "Consulte, edite, confirme pedidos e exclua documentos em um só lugar.",
-    )
+def aba_orcamentos(status_fixo="Orçamentos"):
+    """Uma única interface de edição, filtrada pela aba do estágio comercial."""
+    secoes = {
+        "Orçamentos": (
+            "Orçamentos",
+            "Propostas ainda não confirmadas. Edite, confirme o pedido ou exclua.",
+        ),
+        "Pedidos de venda": (
+            "Pedidos de venda",
+            "Pedidos confirmados aguardando conclusão ou faturamento.",
+        ),
+        "Vendas concluídas": (
+            "Vendas concluídas",
+            "Vendas faturadas. Consulte, edite ou confira as condições registradas.",
+        ),
+    }
+    if status_fixo not in secoes:
+        raise ValueError("Categoria comercial inválida.")
+    secao(*secoes[status_fixo])
 
     with tela_carregamento("Carregando gestão comercial..."):
         orcamentos = carregar_orcamentos()
@@ -3563,23 +3649,20 @@ def aba_orcamentos():
     if aviso_exclusao:
         st.success(aviso_exclusao)
 
-    if st.session_state.pop("msg_reset_base", None):
-        st.success("Base reiniciada com backup privado.")
-    with st.expander("Ferramentas da base"):
-        st.caption("Para reiniciar o contador e apagar os registros ativos, é necessária confirmação.")
-        if st.button("Reiniciar base (com backup)", key="btn_reset_base_orcamentos"):
-            confirmar_reset_base_dialog()
+    if status_fixo == "Orçamentos":
+        if st.session_state.pop("msg_reset_base", None):
+            st.success("Base reiniciada com backup privado.")
+        with st.expander("Ferramentas da base"):
+            st.caption("Para reiniciar o contador e apagar os registros ativos, é necessária confirmação.")
+            if st.button("Reiniciar base (com backup)", key="btn_reset_base_orcamentos"):
+                confirmar_reset_base_dialog()
 
     if not orcamentos:
         st.info("Nenhum registro comercial salvo ainda.")
         return
 
-    status_view = st.radio(
-        "Visualizar",
-        ["Orçamentos", "Pedidos de venda", "Vendas concluídas"],
-        horizontal=True,
-        key="adm_comercial_status_view",
-    )
+    # A aba já define o estágio. Não exibir um segundo seletor redundante.
+    status_view = status_fixo
 
     mapa_status = {
         "Orçamentos": "Orçamento",
@@ -3608,7 +3691,7 @@ def aba_orcamentos():
 
     busca = st.text_input(
         "Buscar por número, cliente ou telefone",
-        key="adm_buscar_orcamentos",
+        key=f"adm_buscar_{status_fixo.lower().replace(' ', '_')}",
     ).strip().lower()
 
     filtrados = []
@@ -5699,39 +5782,125 @@ def aba_gestao_comercial():
     st.caption("Previsões não são recebimentos. A Central de Faturamento contém os detalhes e filtros por período.")
 
 
-def resumo_agenda_inicio(registros):
-    """Visão rápida antes das abas, sem ocupar a tela inteira."""
+def painel_semana_admin(registros):
+    """Agenda desta semana em ordem cronológica, com acesso à agenda completa."""
+    from html import escape
+
     hoje = datetime.now(FUSO_BRASILIA).date()
-    marcados_hoje = []
+    # Sete dias a partir de hoje, para sempre mostrar os próximos compromissos.
+    dias = [hoje + timedelta(days=indice) for indice in range(7)]
+    agenda = {dia: [] for dia in dias}
     atrasados = 0
+    sem_data = 0
     for registro in registros:
         if registro.get("status") != "Pedido de venda" or servico_ja_realizado(registro):
             continue
         momento = data_hora_agendamento(registro)
         if momento is None:
-            continue
-        if momento.date() == hoje:
-            marcados_hoje.append((momento, registro))
+            sem_data += 1
         elif momento.date() < hoje:
             atrasados += 1
-    marcados_hoje.sort(key=lambda item: item[0])
+        elif momento.date() in agenda:
+            agenda[momento.date()].append((momento, registro))
+    for compromissos in agenda.values():
+        compromissos.sort(key=lambda item: (item[0], str(item[1].get("numero", ""))))
 
-    with st.container(border=True):
-        st.markdown("**📅 Serviços de hoje**")
-        if marcados_hoje:
-            for momento, registro in marcados_hoje[:3]:
-                nome = registro.get("cliente", {}).get("nome", "Cliente")
-                st.markdown(
-                    f"**{momento.strftime('%H:%M')} — {nome}**  "
-                    f"· {descricao_agendamento(registro)}"
-                )
-            if len(marcados_hoje) > 3:
-                st.caption(f"Mais {len(marcados_hoje) - 3} serviço(s) hoje. Abra a aba Agenda.")
-        else:
-            st.caption("Nenhum serviço pendente agendado para hoje.")
-        if atrasados:
-            st.warning(f"{atrasados} serviço(s) de datas anteriores ainda pendentes.")
-        st.caption("Agenda completa, próximos dias e histórico: aba Agenda.")
+    st.markdown("""
+    <div class="fc-home-heading">
+      <div class="fc-home-eyebrow">PAINEL OPERACIONAL</div>
+      <div class="fc-home-title">📅 Minha semana</div>
+      <div class="fc-home-sub">Próximos 7 dias • serviços confirmados e ainda não realizados</div>
+    </div>
+    """, unsafe_allow_html=True)
+    dias_semana = ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+    for dia in dias:
+        compromissos = agenda[dia]
+        titulo_dia = "HOJE" if dia == hoje else "AMANHÃ" if dia == hoje + timedelta(days=1) else dias_semana[dia.weekday()].upper()
+        titulo = f"{titulo_dia} · {dia.strftime('%d/%m')}"
+        itens_html = []
+        for momento, registro in compromissos:
+            nome = escape(str((registro.get("cliente") or {}).get("nome") or "Cliente"))
+            numero = escape(str(registro.get("numero", "")).zfill(4))
+            servico = escape(str(descricao_agendamento(registro)))
+            ag = registro.get("agendamento") or {}
+            local = escape(str(ag.get("endereco") or (registro.get("cliente") or {}).get("cidade") or "Local a confirmar"))
+            itens_html.append(
+                '<div class="fc-home-event">'
+                f'<div class="fc-home-event-time">{momento.strftime("%H:%M")}</div>'
+                '<div class="fc-home-event-info">'
+                f'<strong>{nome}</strong><span>{servico}</span>'
+                f'<small>📍 {local} · Pedido #{numero}</small>'
+                '</div></div>'
+            )
+        conteudo = "".join(itens_html) if itens_html else '<div class="fc-home-empty">Nenhum serviço agendado</div>'
+        quantidade = f"{len(compromissos)} serviço(s)" if compromissos else "Livre"
+        st.markdown(
+            '<div class="fc-home-day">'
+            '<div class="fc-home-day-heading">'
+            f'<strong>{titulo}</strong><span>{quantidade}</span>'
+            '</div>' + conteudo + '</div>',
+            unsafe_allow_html=True,
+        )
+
+    if atrasados or sem_data:
+        st.warning(
+            f"{atrasados} serviço(s) atrasado(s) · {sem_data} pedido(s) sem agendamento. "
+            "Consulte a Agenda para resolver."
+        )
+    if st.button("📅 Abrir agenda completa e histórico", key="fc_home_abrir_agenda", use_container_width=True, type="primary"):
+        st.session_state["admin_view"] = "agenda"
+        st.rerun()
+
+
+def estilo_dashboard_admin():
+    st.markdown("""
+<style>
+.fc-home-heading {margin: 8px 0 12px;}
+.fc-home-eyebrow {font-size: 10px;letter-spacing: 1.5px;color: #73b4ff;font-weight: 800;}
+.fc-home-title {font-size: 23px;line-height: 1.3;font-weight: 850;color: #f7faff;margin-top: 3px;}
+.fc-home-sub {font-size: 12px;color: #aab7cd;margin-top: 4px;}
+.fc-home-day {background: linear-gradient(130deg,#141c2b,#101721);border:1px solid #2d3e58;border-radius: 12px;padding: 11px 12px;margin-bottom: 7px;}
+.fc-home-day-heading {display:flex;align-items:center;justify-content:space-between;gap:8px;color:#eaf3ff;font-size:12px;}
+.fc-home-day-heading strong {color:#6eb5ff;letter-spacing:.5px;}
+.fc-home-day-heading span {color:#99abc4;font-size:11px;}
+.fc-home-empty {font-size:11px;color:#7f8fa6;margin-top:5px;}
+.fc-home-event {display:flex;gap:12px;align-items:flex-start;border-top:1px solid #293549;margin-top:9px;padding-top:9px;}
+.fc-home-event-time {font-weight:850;color:#ffad61;font-size:14px;min-width:44px;}
+.fc-home-event-info {display:flex;flex-direction:column;gap:3px;min-width:0;}
+.fc-home-event-info strong {color:#f4f8ff;font-size:12px;}
+.fc-home-event-info span {color:#b6c8df;font-size:11px;}
+.fc-home-event-info small {color:#94a6bc;font-size:10px;}
+.fc-home-grid-title {font-size:17px;font-weight:850;color:#f1f8ff;margin:20px 0 10px;}
+div[class*="st-key-fc_atalho_"] button {min-height:86px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:12px 7px !important;font-size:13px !important;font-weight:750 !important;white-space:normal !important;line-height:1.45 !important;}
+div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
+</style>
+    """, unsafe_allow_html=True)
+
+
+def atalhos_inicio_admin():
+    atalhos = [
+        ("novo", "📝 Novo orçamento"),
+        ("agenda", "📅 Agenda"),
+        ("orcamentos", "📄 Orçamentos"),
+        ("pedidos", "📋 Pedidos de venda"),
+        ("vendas", "✅ Vendas concluídas"),
+        ("realizados", "🛠️ Serviços realizados"),
+        ("gestao", "📊 Gestão comercial"),
+        ("financeiro", "📈 Central financeira"),
+        ("servicos", "🔧 Serviços"),
+        ("materiais", "📦 Materiais"),
+        ("aparelhos", "❄️ Aparelhos"),
+        ("regras", "⚙️ Regras"),
+        ("empresa", "🏢 Empresa"),
+    ]
+    st.markdown('<div class="fc-home-grid-title">Acessos rápidos</div>', unsafe_allow_html=True)
+    for pos in range(0, len(atalhos), 2):
+        colunas = st.columns(2, gap="small")
+        for coluna, (destino, rotulo) in zip(colunas, atalhos[pos:pos+2]):
+            with coluna:
+                if st.button(rotulo, use_container_width=True, key=f"fc_atalho_{destino}"):
+                    st.session_state["admin_view"] = destino
+                    st.rerun()
 
 
 def historico_servicos_admin(registros):
@@ -5781,52 +5950,49 @@ def pagina_admin():
         st.caption("Neste dispositivo, o acesso pode permanecer ativo por até 14 dias. Use Sair para encerrá-lo.")
         return
 
-    if st.session_state.get("admin_view") == "faturamento":
+    pagina = st.session_state.get("admin_view", "painel")
+    if pagina == "faturamento":
+        # Compatibilidade com o nome de tela usado anteriormente.
+        pagina = "financeiro"
+    if pagina == "financeiro":
         pagina_central_faturamento()
         return
 
     cabecalho(admin=True)
-    # Ações prioritárias ficam visíveis no topo, sem a agenda longa
-    # empurrar as abas para o fim da tela no celular.
-    registros_resumo = carregar_orcamentos()
-    resumo_agenda_inicio(registros_resumo)
-
+    estilo_dashboard_admin()
     st.markdown(ESTILO_LINHAS_ADMIN, unsafe_allow_html=True)
-    tabs = st.tabs([
-        "Novo orçamento",
-        "Agenda",
-        "Orçamentos",
-        "Serviços realizados",
-        "Gestão comercial",
-        "Serviços",
-        "Materiais",
-        "Aparelhos",
-        "Regras",
-        "Empresa",
-    ])
-    with tabs[0]:
-        pagina_cliente(interno=True)
-    with tabs[1]:
-        agenda_admin(carregar_orcamentos())
-    with tabs[2]:
-        aba_orcamentos()
-    with tabs[3]:
-        historico_servicos_admin(carregar_orcamentos())
-    with tabs[4]:
-        aba_gestao_comercial()
-        if st.button("ABRIR CENTRAL DE FATURAMENTO", use_container_width=True, key="abrir_central_faturamento"):
-            st.session_state["admin_view"] = "faturamento"
+
+    if pagina == "painel":
+        registros_resumo = carregar_orcamentos()
+        painel_semana_admin(registros_resumo)
+        atalhos_inicio_admin()
+    else:
+        if st.button("← Voltar ao início", use_container_width=True, key="fc_voltar_inicio"):
+            st.session_state["admin_view"] = "painel"
             st.rerun()
-    with tabs[5]:
-        aba_servicos()
-    with tabs[6]:
-        aba_materiais()
-    with tabs[7]:
-        aba_aparelhos()
-    with tabs[8]:
-        aba_regras()
-    with tabs[9]:
-        aba_empresa()
+        telas = {
+            "novo": lambda: pagina_cliente(interno=True),
+            "agenda": lambda: agenda_admin(carregar_orcamentos()),
+            "orcamentos": lambda: aba_orcamentos("Orçamentos"),
+            "pedidos": lambda: aba_orcamentos("Pedidos de venda"),
+            "vendas": lambda: aba_orcamentos("Vendas concluídas"),
+            "realizados": lambda: historico_servicos_admin(carregar_orcamentos()),
+            "gestao": aba_gestao_comercial,
+            "servicos": aba_servicos,
+            "materiais": aba_materiais,
+            "aparelhos": aba_aparelhos,
+            "regras": aba_regras,
+            "empresa": aba_empresa,
+        }
+        tela = telas.get(pagina)
+        if tela is None:
+            st.session_state["admin_view"] = "painel"
+            st.rerun()
+        tela()
+        if pagina == "gestao":
+            if st.button("📈 Abrir central de faturamento", use_container_width=True, key="abrir_central_faturamento"):
+                st.session_state["admin_view"] = "financeiro"
+                st.rerun()
 
     st.divider()
     try:
@@ -7482,7 +7648,7 @@ def pagina_cliente(interno=False):
         key="cliente_observacoes",
     )
 
-    secao("Seus dados", "Preencha para identificar e registrar o orçamento.")
+    secao("Dados do cliente", "Identifique o cliente para registrar o orçamento.")
 
     nome_cliente = st.text_input(
         "Nome",
