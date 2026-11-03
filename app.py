@@ -5304,6 +5304,60 @@ def aba_gestao_comercial():
     st.caption("Previsões não são recebimentos. A Central de Faturamento contém os detalhes e filtros por período.")
 
 
+def resumo_agenda_inicio(registros):
+    """Visão rápida antes das abas, sem ocupar a tela inteira."""
+    hoje = datetime.now(FUSO_BRASILIA).date()
+    marcados_hoje = []
+    atrasados = 0
+    for registro in registros:
+        if registro.get("status") != "Pedido de venda" or servico_ja_realizado(registro):
+            continue
+        momento = data_hora_agendamento(registro)
+        if momento is None:
+            continue
+        if momento.date() == hoje:
+            marcados_hoje.append((momento, registro))
+        elif momento.date() < hoje:
+            atrasados += 1
+    marcados_hoje.sort(key=lambda item: item[0])
+
+    with st.container(border=True):
+        st.markdown("**📅 Serviços de hoje**")
+        if marcados_hoje:
+            for momento, registro in marcados_hoje[:3]:
+                nome = registro.get("cliente", {}).get("nome", "Cliente")
+                st.markdown(
+                    f"**{momento.strftime('%H:%M')} — {nome}**  "
+                    f"· {descricao_agendamento(registro)}"
+                )
+            if len(marcados_hoje) > 3:
+                st.caption(f"Mais {len(marcados_hoje) - 3} serviço(s) hoje. Abra a aba Agenda.")
+        else:
+            st.caption("Nenhum serviço pendente agendado para hoje.")
+        if atrasados:
+            st.warning(f"{atrasados} serviço(s) de datas anteriores ainda pendentes.")
+        st.caption("Agenda completa, próximos dias e histórico: aba Agenda.")
+
+
+def historico_servicos_admin(registros):
+    """Histórico dedicado, preservando a possibilidade de concluir vendas."""
+    realizados = []
+    for registro in registros:
+        if not servico_ja_realizado(registro):
+            continue
+        momento = data_hora_agendamento(registro)
+        if momento is not None:
+            realizados.append((momento, registro))
+    realizados.sort(key=lambda item: item[0], reverse=True)
+    secao("Serviços realizados", "Histórico de trabalhos executados, do mais recente ao mais antigo.")
+    if not realizados:
+        st.info("Nenhum serviço realizado registrado.")
+        return
+    st.caption(f"{len(realizados)} serviço(s) realizado(s)")
+    for momento, registro in realizados:
+        exibir_compromisso(momento, registro, realizado=True)
+
+
 def pagina_admin():
     # Nunca renderizar informações, cadastros ou orçamento antes da autenticação.
     if not ADMIN_KEY:
@@ -5337,18 +5391,17 @@ def pagina_admin():
         return
 
     cabecalho(admin=True)
-    # A agenda é o primeiro conteúdo após o login.
-    with st.container(border=True):
-        agenda_admin(carregar_orcamentos(), compacta=True)
-
-    if st.button("📊 ABRIR CENTRAL DE FATURAMENTO", use_container_width=True, key="abrir_central_faturamento"):
-        st.session_state["admin_view"] = "faturamento"
-        st.rerun()
+    # Ações prioritárias ficam visíveis no topo, sem a agenda longa
+    # empurrar as abas para o fim da tela no celular.
+    registros_resumo = carregar_orcamentos()
+    resumo_agenda_inicio(registros_resumo)
 
     st.markdown(ESTILO_LINHAS_ADMIN, unsafe_allow_html=True)
     tabs = st.tabs([
         "Novo orçamento",
+        "Agenda",
         "Orçamentos",
+        "Serviços realizados",
         "Gestão comercial",
         "Serviços",
         "Materiais",
@@ -5359,18 +5412,25 @@ def pagina_admin():
     with tabs[0]:
         pagina_cliente(interno=True)
     with tabs[1]:
-        aba_orcamentos()
+        agenda_admin(carregar_orcamentos())
     with tabs[2]:
-        aba_gestao_comercial()
+        aba_orcamentos()
     with tabs[3]:
-        aba_servicos()
+        historico_servicos_admin(carregar_orcamentos())
     with tabs[4]:
-        aba_materiais()
+        aba_gestao_comercial()
+        if st.button("ABRIR CENTRAL DE FATURAMENTO", use_container_width=True, key="abrir_central_faturamento"):
+            st.session_state["admin_view"] = "faturamento"
+            st.rerun()
     with tabs[5]:
-        aba_aparelhos()
+        aba_servicos()
     with tabs[6]:
-        aba_regras()
+        aba_materiais()
     with tabs[7]:
+        aba_aparelhos()
+    with tabs[8]:
+        aba_regras()
+    with tabs[9]:
         aba_empresa()
 
     st.divider()
@@ -5601,9 +5661,15 @@ def editor_orcamento_cliente():
             possui_atual = "Sim, já tenho o aparelho"
 
         edit_possui = st.radio(
-            "Situação do aparelho",
+            "Situação do aparelho do cliente",
             opcoes_possui,
             index=opcoes_possui.index(possui_atual),
+            format_func=lambda valor: {
+                "Sim, já tenho o aparelho": "O cliente já possui o aparelho",
+                "Não, quero comprar": "O cliente quer comprar um aparelho",
+                "Já tenho um e também quero comprar outro": "O cliente possui um e quer comprar outro",
+                "Ainda estou avaliando": "O cliente está avaliando as opções",
+            }.get(valor, valor),
             key=f"edit_possui_{numero}",
         )
 
@@ -5678,7 +5744,7 @@ def editor_orcamento_cliente():
                 )
 
             edit_modo_compra = st.radio(
-                "Como deseja montar o orçamento?",
+                "Tipo de seleção de equipamentos",
                 modos_compra,
                 index=modos_compra.index(modo_atual),
                 horizontal=True,
@@ -6487,30 +6553,23 @@ def pagina_cliente(interno=False):
     if not interno:
         cabecalho(admin=False)
 
-    modo_area_cliente = st.radio(
-        "O que deseja fazer?",
-        ["Novo orçamento", "Editar orçamento existente"],
-        horizontal=True,
-        key="modo_area_cliente",
-    )
-
-    if modo_area_cliente == "Editar orçamento existente":
-        editor_orcamento_cliente()
-        return
-
+    # O uso é exclusivamente administrativo. A edição está na aba Orçamentos.
     st.markdown(
         """
         <div class="info-card">
           <div class="card-title">Criar novo orçamento</div>
           <div class="card-text">
-            Monte uma estimativa inicial. O valor final será confirmado antes do serviço.
+            Cadastre os dados e serviços do cliente para gerar um orçamento.
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    secao("Seu aparelho", "Informe se já possui o equipamento ou deseja comprar.")
+    secao(
+        "Aparelho do cliente",
+        "Selecione a situação do equipamento para preparar o orçamento.",
+    )
 
     opcoes_possui = [
         "Sim, já tenho o aparelho",
@@ -6518,11 +6577,18 @@ def pagina_cliente(interno=False):
         "Já tenho um e também quero comprar outro",
         "Ainda estou avaliando",
     ]
+    rotulos_possui_adm = {
+        "Sim, já tenho o aparelho": "O cliente já possui o aparelho",
+        "Não, quero comprar": "O cliente quer comprar um aparelho",
+        "Já tenho um e também quero comprar outro": "O cliente possui um e quer comprar outro",
+        "Ainda estou avaliando": "O cliente está avaliando as opções",
+    }
     garantir_opcao_valida("cliente_possui", opcoes_possui)
 
     possui = st.radio(
-        "Você já possui o aparelho?",
+        "Situação do aparelho do cliente",
         opcoes_possui,
+        format_func=lambda valor: rotulos_possui_adm.get(valor, valor),
         key="cliente_possui",
     )
 
@@ -6782,7 +6848,7 @@ def pagina_cliente(interno=False):
             )
 
         if possui == "Já tenho um e também quero comprar outro":
-            st.markdown("#### Aparelho que você já possui")
+            st.markdown("#### Aparelho que o cliente já possui")
             capacidade_existente = st.selectbox(
                 "Capacidade do aparelho que já possui",
                 CAPACIDADES + ["Não sei"],
@@ -6810,7 +6876,7 @@ def pagina_cliente(interno=False):
 
     if possui == "Já tenho um e também quero comprar outro":
         secao(
-            "Serviços para o aparelho que você já possui",
+            "Serviços para o aparelho que o cliente já possui",
             "O aparelho comprado da F Climatização já terá a instalação inclusa.",
         )
     elif possui == "Não, quero comprar":
