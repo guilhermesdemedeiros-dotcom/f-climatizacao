@@ -16,7 +16,7 @@ import hmac
 import hashlib
 import re
 import secrets
-from datetime import date, timedelta
+from datetime import date, timedelta, time as horario_time
 import hashlib
 from contextlib import contextmanager
 
@@ -59,6 +59,7 @@ CONFIG_FILE = "config.json"
 BUDGETS_FILE = "orcamentos.json"
 FINANCE_FILE = "financeiro.json"
 BUDGET_META_FILE = "orcamentos_meta.json"
+AGENDA_FILE = "agenda_disponibilidade.json"
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
@@ -658,6 +659,7 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_nome",
     "cliente_telefone",
     "cliente_cidade",
+    "cliente_desconto_geral",
     "cliente_equipamentos_selecionados",
 ]
 
@@ -760,7 +762,7 @@ def salvar_rascunho_cliente():
         nome_campo = str(campo)
         if nome_campo.startswith("cliente_eq_visivel_"):
             dados[campo] = bool(valor)
-        elif nome_campo.startswith("cliente_mat_qtd_"):
+        elif nome_campo.startswith(("cliente_mat_qtd_", "cliente_pontos_", "cliente_desc_eq_", "cliente_desc_serv_")):
             dados[campo] = valor
 
     if not dados:
@@ -2801,6 +2803,294 @@ def encerrar_sessao_admin():
 # =========================================================
 
 
+# Disponibilidade e bloqueios ficam exclusivamente no repositório PRIVADO.
+# Não existe regravação do config.json público para armazenar rotina pessoal.
+AGENDA_DEFAULT = {
+    "janelas_semanais": {
+        str(i): [["08:00", "12:00"], ["13:00", "18:00"]] if i < 5 else []
+        for i in range(7)
+    },
+    "excecoes": {},
+    "duracao_servicos": {},
+    "passo_minutos": 30,
+}
+DIAS_SEMANA_AGENDA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+
+
+def carregar_disponibilidade_agenda():
+    conteudo, _ = github_get_file(DATA_REPO, AGENDA_FILE)
+    if conteudo is None:
+        return copy.deepcopy(AGENDA_DEFAULT)
+    dados = json.loads(conteudo)
+    if not isinstance(dados, dict):
+        raise ValueError("Configuração privada da agenda inválida.")
+    base = copy.deepcopy(AGENDA_DEFAULT)
+    base.update(dados)
+    return base
+
+
+def salvar_disponibilidade_agenda(dados):
+    _, sha = github_get_file(DATA_REPO, AGENDA_FILE)
+    github_put_file(DATA_REPO, AGENDA_FILE, json.dumps(dados, ensure_ascii=False, indent=2),
+                    "Atualiza disponibilidade e exceções da agenda", sha=sha)
+
+
+def minutos_horario(hora):
+    partes = str(hora).split(":")
+    if len(partes) != 2:
+        raise ValueError("Horário inválido")
+    h, m = int(partes[0]), int(partes[1])
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ValueError("Horário inválido")
+    return 60*h+m
+
+
+def formatar_minutos(valor):
+    return f"{valor//60:02d}:{valor%60:02d}"
+
+
+def janelas_de_texto(texto):
+    """Exemplo: 08:00-12:00, 17:00-22:00."""
+    if not str(texto).strip():
+        return []
+    resultado=[]
+    for trecho in str(texto).split(','):
+        pedacos = trecho.strip().replace('–','-').split('-')
+        if len(pedacos) != 2:
+            raise ValueError("Use o formato 08:00-12:00, 17:00-22:00")
+        inicio, fim = (minutos_horario(v.strip()) for v in pedacos)
+        if inicio >= fim:
+            raise ValueError("O horário final precisa ser posterior ao inicial.")
+        resultado.append([formatar_minutos(inicio), formatar_minutos(fim)])
+    resultado.sort(key=lambda v: v[0])
+    for atual, proxima in zip(resultado, resultado[1:]):
+        if minutos_horario(atual[1]) > minutos_horario(proxima[0]):
+            raise ValueError("As faixas de horários não podem se sobrepor.")
+    return resultado
+
+
+def texto_janelas(janelas):
+    return ', '.join(f'{v[0]}-{v[1]}' for v in janelas)
+
+
+def eh_instalacao_agenda(registro):
+    desc = descricao_agendamento(registro).casefold()
+    return 'instala' in desc or 'infraestrutura' in desc or 'infra ' in desc
+
+
+def duracao_agendamento(registro, disponibilidade, quantidade=None, minutos_unitarios=None):
+    ag = registro.get('agendamento') or {}
+    if minutos_unitarios is None:
+        minutos_unitarios = ag.get('minutos_por_aparelho')
+    if quantidade is None:
+        quantidade = ag.get('quantidade_aparelhos')
+    desc = descricao_agendamento(registro).lower()
+    duracoes = disponibilidade.get('duracao_servicos', {})
+    if minutos_unitarios is None:
+        nome = next((nome for nome in duracoes if nome.lower() in desc), None)
+        minutos_unitarios = duracoes.get(nome) if nome else None
+    if minutos_unitarios is None:
+        minutos_unitarios = 60
+    if quantidade is None:
+        if 'higieniza' in desc or 'limpeza' in desc:
+            quantidade = sum(
+                max(1, int(float(i.get('quantidade',1) or 1)))
+                for i in registro.get('itens', [])
+                if 'higieniza' in str(i.get('descricao','')).lower() or 'limpeza' in str(i.get('descricao','')).lower()
+            ) or 1
+        else:
+            quantidade = 1
+    return max(30, int(minutos_unitarios)*max(1, int(quantidade)))
+
+
+def disponibilidade_para_dia(dia, disponibilidade, instalacao=False):
+    chave = dia.isoformat()
+    excecao = disponibilidade.get('excecoes', {}).get(chave, {})
+    if excecao.get('tipo') == 'indisponivel':
+        return []
+    if instalacao and excecao.get('tipo') == 'chuva':
+        return []
+    janelas = disponibilidade.get('janelas_semanais', {}).get(str(dia.weekday()), [])
+    if excecao.get('tipo') == 'horarios':
+        janelas = excecao.get('janelas', [])
+    return janelas
+
+
+def horarios_livres_agenda(dia, duracao_min, registros, disponibilidade, registro_id=None,
+                          instalacao=False, agora=None):
+    if agora is None:
+        agora = datetime.now(FUSO_BRASILIA).replace(tzinfo=None)
+    reservas=[]
+    for registro in registros:
+        if str(registro.get('numero','')).zfill(4) == str(registro_id or '').zfill(4):
+            continue
+        if registro.get('status') != 'Pedido de venda' or servico_ja_realizado(registro):
+            continue
+        inicio = data_hora_agendamento(registro)
+        if inicio and inicio.date() == dia:
+            dur = duracao_agendamento(registro, disponibilidade)
+            reservas.append((inicio.hour*60+inicio.minute, inicio.hour*60+inicio.minute+dur))
+    passo = max(15, int(disponibilidade.get('passo_minutos',30) or 30))
+    livres=[]
+    for j_ini, j_fim in disponibilidade_para_dia(dia, disponibilidade, instalacao):
+        inicio, fim = minutos_horario(j_ini), minutos_horario(j_fim)
+        primeiro = ((inicio + passo - 1)//passo)*passo
+        for instante in range(primeiro, fim-duracao_min+1, passo):
+            candidato = datetime.combine(dia, horario_time(instante//60, instante%60))
+            if candidato <= agora:
+                continue
+            if any(instante < fim_r and instante+duracao_min > ini_r for ini_r,fim_r in reservas):
+                continue
+            livres.append(formatar_minutos(instante))
+    return livres
+
+
+def proximo_dias_disponiveis(registros, disponibilidade, duracao, *,
+                             registro_id=None, instalacao=False, dias=21):
+    hoje = datetime.now(FUSO_BRASILIA).date()
+    retorno={}
+    for i in range(dias):
+        dia = hoje + timedelta(days=i)
+        livres = horarios_livres_agenda(dia, duracao, registros, disponibilidade,
+                   registro_id=registro_id, instalacao=instalacao)
+        if livres:
+            retorno[dia]=livres
+    return retorno
+
+
+def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefixo,
+                             *, permitir_pendente=False, selecao_inicial=True):
+    """Retorna dicionário completo ou None quando não selecionado."""
+    ag = registro.get('agendamento') or {}
+    descricao = descricao_agendamento(registro).lower()
+    higienizacao = 'higieniza' in descricao or 'limpeza' in descricao
+    qtd_inicial = max(1, min(100, int(ag.get('quantidade_aparelhos') or (
+        sum(max(1, int(float(i.get('quantidade', 1) or 1)))
+            for i in registro.get('itens', [])
+            if ('higieniza' in str(i.get('descricao','')).lower()
+                or 'limpeza' in str(i.get('descricao','')).lower())) if higienizacao else 1
+    ) or 1)))
+    qtd = st.number_input('Quantidade de aparelhos / unidades', min_value=1, max_value=100,
+                          value=qtd_inicial, step=1, key=f'{prefixo}_qtd_{numero}')
+    if higienizacao:
+        st.caption('Higienização: duração padrão de 1 hora por aparelho.')
+    padrao = duracao_agendamento(registro, disponibilidade, quantidade=1, minutos_unitarios=None)
+    minutos_salvos = ag.get('minutos_por_aparelho')
+    alterar = st.checkbox('Ajustar duração por aparelho/unidade', value=bool(minutos_salvos and int(minutos_salvos)!=padrao),
+                         key=f'{prefixo}_personalizar_{numero}')
+    unidade_min = int(st.number_input('Minutos por aparelho/unidade', min_value=15, max_value=720,
+                  value=int(minutos_salvos or padrao), step=15, key=f'{prefixo}_minutos_{numero}')) if alterar else padrao
+    duracao = int(qtd) * unidade_min
+    st.markdown(f'**Tempo reservado: {duracao//60}h{duracao%60:02d}** · {qtd} unidade(s) × {unidade_min} min')
+    livres = proximo_dias_disponiveis(registros, disponibilidade, duracao,
+                      registro_id=numero, instalacao=eh_instalacao_agenda(registro), dias=28)
+    if not livres:
+        st.warning('Não há intervalo livre nos próximos 28 dias. Configure seus turnos e bloqueios na aba Agenda.')
+        return None
+    datas=list(livres)
+    dia = st.selectbox('Dia com horário livre', datas,
+                       format_func=lambda d: f'{DIAS_SEMANA_AGENDA[d.weekday()]} · {d.strftime("%d/%m/%Y")}',
+                       key=f'{prefixo}_dia_{numero}')
+    hora = st.selectbox('Horário disponível', livres[dia], key=f'{prefixo}_hora_{numero}')
+    st.caption(f'Início {hora} · término {formatar_minutos(minutos_horario(hora)+duracao)}')
+    return {'data': dia.isoformat(), 'hora': hora, 'duracao_minutos': duracao,
+            'quantidade_aparelhos': int(qtd), 'minutos_por_aparelho': unidade_min}
+
+
+def painel_configuracao_agenda():
+    with st.expander('Disponibilidade, turnos e dias bloqueados', expanded=False):
+        st.caption('Horários de trabalho disponíveis. Ajuste por dia ou marque exceções (turno, folga e chuva).')
+        try:
+            disponibilidade = carregar_disponibilidade_agenda()
+        except Exception as e:
+            st.error(f'Não foi possível carregar a disponibilidade privada: {e}')
+            return
+        with st.form('agenda_turnos_form'):
+            novos={}
+            for indice, nome in enumerate(DIAS_SEMANA_AGENDA):
+                atual=disponibilidade.get('janelas_semanais',{}).get(str(indice),[])
+                novos[str(indice)] = st.text_input(nome, value=texto_janelas(atual),
+                                      placeholder='08:00-12:00, 17:00-22:00')
+            enviar=st.form_submit_button('Salvar meus turnos', use_container_width=True)
+        if enviar:
+            try:
+                disponibilidade['janelas_semanais']={str(i): janelas_de_texto(v) for i,v in novos.items()}
+                salvar_disponibilidade_agenda(disponibilidade)
+                st.success('Turnos atualizados.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Erro ao salvar turnos: {e}')
+        st.divider()
+        st.markdown('**Tempo padrão de cada serviço**')
+        st.caption('Configure a duração estimada por unidade. Higienização usa 60 minutos por aparelho quando não houver personalização.')
+        duracoes_novas = {}
+        with st.form('agenda_duracoes_form'):
+            for nome_servico in sorted(config.get('servicos', {}), key=str.casefold):
+                padrao = 60
+                atual = int(disponibilidade.get('duracao_servicos', {}).get(nome_servico, padrao))
+                duracoes_novas[nome_servico] = int(st.number_input(
+                    f'{nome_servico} · minutos por unidade', min_value=15, max_value=720,
+                    value=max(15, min(720, atual)), step=15,
+                    key=f'ag_dur_serv_{hashlib.sha1(nome_servico.encode()).hexdigest()[:12]}'))
+            salvar_duracoes = st.form_submit_button('Salvar tempos dos serviços', use_container_width=True)
+        if salvar_duracoes:
+            try:
+                disponibilidade['duracao_servicos'] = duracoes_novas
+                salvar_disponibilidade_agenda(disponibilidade)
+                st.success('Tempos padrão salvos.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Não foi possível salvar os tempos: {e}')
+        st.divider()
+        st.markdown('**Bloquear ou liberar uma data específica**')
+        d = st.date_input('Data da exceção', value=datetime.now(FUSO_BRASILIA).date(), key='agenda_exc_dia')
+        tipo=st.selectbox('Regra para esta data',
+               ['Indisponível para todos os serviços', 'Chuva: bloquear apenas instalações', 'Horários especiais', 'Remover bloqueio'],
+               key='agenda_exc_tipo')
+        faixas=st.text_input('Horários disponíveis nessa data', placeholder='17:00-22:00',
+                            key='agenda_exc_faixas') if tipo=='Horários especiais' else ''
+        nota=st.text_input('Motivo (opcional)', key='agenda_exc_motivo')
+        if st.button('Salvar bloqueio / exceção', key='agenda_exc_salvar'):
+            try:
+                if tipo=='Remover bloqueio':
+                    disponibilidade.setdefault('excecoes',{}).pop(d.isoformat(),None)
+                else:
+                    regra={'Indisponível para todos os serviços':'indisponivel',
+                            'Chuva: bloquear apenas instalações':'chuva','Horários especiais':'horarios'}[tipo]
+                    excecao={'tipo':regra,'motivo':nota.strip()}
+                    if regra=='horarios':
+                        excecao['janelas']=janelas_de_texto(faixas)
+                    disponibilidade.setdefault('excecoes',{})[d.isoformat()]=excecao
+                # Não remove agendamentos existentes. A agenda destaca os afetados
+                # para reagendamento com nova data/hora e preserva o histórico.
+                salvar_disponibilidade_agenda(disponibilidade)
+                afetados=reagendar_registros_bloqueados(carregar_orcamentos(), disponibilidade, d, excecao.get('tipo') if tipo!='Remover bloqueio' else '')
+                if afetados:
+                    st.warning(f'{len(afetados)} pedido(s) precisam ser reagendados para outro horário.')
+                st.success('Disponibilidade atualizada.')
+                st.rerun()
+            except Exception as e:
+                st.error(f'Não foi possível salvar a exceção: {e}')
+        excecoes = disponibilidade.get('excecoes', {})
+        if excecoes:
+            st.caption('Exceções cadastradas:')
+            for chave, val in sorted(excecoes.items()):
+                st.caption(f"{chave} · {val.get('tipo','')} · {val.get('motivo','')}")
+
+
+def reagendar_registros_bloqueados(registros, disponibilidade, data_bloqueada, tipo):
+    """Registros afetados continuam agendados até receber novo horário confirmado.
+    Assim um bloqueio não transforma um pedido válido em pendente involuntariamente.
+    """
+    afetados=[]
+    for registro in registros:
+        dt=data_hora_agendamento(registro)
+        if (registro.get('status')=='Pedido de venda' and not servico_ja_realizado(registro)
+            and dt is not None and dt.date()==data_bloqueada and
+            (tipo=='indisponivel' or (tipo=='chuva' and eh_instalacao_agenda(registro)))):
+            afetados.append(registro)
+    return afetados
+
 def data_hora_agendamento(registro):
     ag = registro.get("agendamento") or {}
     dia = str(ag.get("data", ""))
@@ -2858,13 +3148,39 @@ def agenda_admin(registros, *, compacta=False):
 
     st.markdown("### Minha agenda")
     st.caption("Serviços por data e horário • marque o que já foi executado")
+    painel_configuracao_agenda()
+    try:
+        disponibilidade_agenda=carregar_disponibilidade_agenda()
+        inconsistentes=[]
+        for r in registros:
+            dt=data_hora_agendamento(r)
+            if (r.get('status')=='Pedido de venda' and not servico_ja_realizado(r) and dt and
+                not disponibilidade_para_dia(dt.date(), disponibilidade_agenda, eh_instalacao_agenda(r))):
+                inconsistentes.append(r)
+        if inconsistentes:
+            st.warning(f"{len(inconsistentes)} serviço(s) ficaram em dia bloqueado. Reagende antes de executar.")
+            with st.expander('Reagendar serviços afetados por bloqueios', expanded=True):
+                for r in inconsistentes:
+                    num=str(r.get('numero','')).zfill(4)
+                    st.markdown(f"**#{num} · {r.get('cliente',{}).get('nome','Cliente')}**")
+                    if st.button('Escolher nova data e horário',key=f'bloqueado_reag_{num}'):
+                        reagendar_por_impedimento(num)
+    except Exception as e:
+        st.error(f"Não foi possível conferir bloqueios: {e}")
     col1, col2, col3 = st.columns(3)
     col1.metric("A fazer", len(proximos))
     col2.metric("Atrasados", len(atrasados))
     col3.metric("Realizados", len(realizados))
 
     if sem_data:
-        st.warning(f"{len(sem_data)} pedido(s) sem agendamento. Abra Orçamentos para informar data e horário.")
+        st.warning(f"{len(sem_data)} pedido(s) pendente(s) de agendamento.")
+        with st.expander(f"Pendentes de agendamento ({len(sem_data)})"):
+            for registro in sem_data:
+                num=str(registro.get('numero','')).zfill(4)
+                nome=registro.get('cliente',{}).get('nome','Cliente')
+                st.markdown(f'**Pedido #{num} · {nome}** · {descricao_agendamento(registro)}')
+                if st.button('Escolher horário',key=f'ag_pendente_{num}'):
+                    editar_agendamento_pedido(num)
 
     grupos = [
         ("HOJE", hoje, "#ff9c35"),
@@ -2965,7 +3281,7 @@ def confirmar_faturamento_agenda(numero):
                 st.error(f"Não foi possível concluir a venda: {e}")
 
 
-def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False):
+def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False, contexto="agenda"):
     from html import escape
     nome = escape(str(registro.get("cliente", {}).get("nome", "Cliente")))
     ag = registro.get("agendamento") or {}
@@ -2976,27 +3292,31 @@ def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False):
     numero_html = escape(numero)
     cor = "#35c584" if realizado else "#ff7770" if atrasado else "#ff821d"
     situacao = "REALIZADO" if realizado else "PENDENTE · DATA PASSADA" if atrasado else "AGENDADO"
+    duracao=int(ag.get('duracao_minutos',60) or 60)
+    termino=dt+timedelta(minutes=duracao)
     st.markdown(
         f"<div style='margin:6px 0 5px;padding:12px 14px;border:1px solid #25466e;"
         f"border-left:4px solid {cor};border-radius:13px;background:#101a2a'>"
         f"<div style='font-weight:850;color:#fff;font-size:15px'>{dt.strftime('%d/%m/%Y')} · {dt.strftime('%H:%M')} — {nome}</div>"
-        f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico}</div>"
+        f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico} · até {termino.strftime('%H:%M')}</div>"
         f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero_html}</div>"
         f"<div style='font-size:11px;font-weight:800;color:{cor};margin-top:6px'>{situacao}</div>"
         f"</div>", unsafe_allow_html=True,
     )
     if registro.get("status") == "Pedido de venda":
         if realizado:
-            if st.button("Concluir venda", key=f"agenda_faturar_{numero}", use_container_width=True):
+            if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
                 confirmar_faturamento_agenda(numero)
         else:
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("✓ Serviço realizado", key=f"agenda_realizar_{numero}", use_container_width=True):
+                if st.button("✓ Serviço realizado", key=f"{contexto}_realizar_{numero}", use_container_width=True):
                     confirmar_servico_realizado(numero)
             with c2:
-                if st.button("Concluir venda", key=f"agenda_faturar_{numero}", use_container_width=True):
+                if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
                     confirmar_faturamento_agenda(numero)
+            if st.button("⚠ Não será possível realizar · reagendar", key=f"{contexto}_reagendar_{numero}", use_container_width=True):
+                reagendar_por_impedimento(numero)
     elif realizado:
         st.caption("Venda concluída · registro mantido no histórico")
 
@@ -3004,85 +3324,160 @@ def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False):
 @st.dialog("Confirmar alteração do pedido")
 def confirmar_status_com_agenda(numero, novo_status, pagamento):
     registros = carregar_orcamentos()
-    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
+    registro = next((r for r in registros if str(r.get('numero','')).zfill(4)==str(numero).zfill(4)),None)
     if registro is None:
-        st.error("Documento não encontrado.")
+        st.error('Documento não encontrado.')
         return
-    st.write(f"Documento **#{numero}** · **{registro.get('cliente', {}).get('nome', 'Cliente')}**")
-    st.write(f"Novo status: **{novo_status}**")
-    ag = registro.get("agendamento") or {}
-    agenda_nova = None
-    if novo_status == "Pedido de venda":
-        st.info("Para confirmar o pedido, informe obrigatoriamente quando e onde será o serviço.")
-        data_inicial = datetime.now(FUSO_BRASILIA).date()
-        try:
-            data_inicial = date.fromisoformat(ag.get("data", ""))
-        except (TypeError, ValueError):
-            pass
-        dia = st.date_input("Data do serviço *", value=data_inicial, key=f"ag_data_{numero}")
-        hora = st.time_input("Horário do serviço *", value=datetime.strptime(ag.get("hora", "09:00"), "%H:%M").time() if re.fullmatch(r"\d{2}:\d{2}", str(ag.get("hora", ""))) else datetime.strptime("09:00", "%H:%M").time(), step=1800, key=f"ag_hora_{numero}")
-        local = st.text_input("Endereço/local do trabalho *", value=ag.get("local", ""), placeholder="Rua, número, bairro, cidade", key=f"ag_local_{numero}")
-        servico = st.text_area("O que será feito *", value=ag.get("servico", "") or descricao_agendamento(registro), height=80, key=f"ag_servico_{numero}")
-        obs = st.text_input("Observações da visita", value=ag.get("observacoes", ""), key=f"ag_obs_{numero}")
-        confirmou_horario = st.checkbox(
-            "Confirmei a data e o horário com o cliente",
-            key=f"ag_confirmei_data_{numero}",
-        )
-        if confirmou_horario and dia and hora and local.strip() and servico.strip():
-            agenda_nova = {"data": dia.isoformat(), "hora": hora.strftime("%H:%M"), "local": local.strip(), "servico": servico.strip(), "observacoes": obs.strip()}
-    st.caption("A alteração será gravada somente após a confirmação abaixo.")
-    c1, c2 = st.columns(2)
+    st.write(f"Documento **#{numero}** · **{registro.get('cliente',{}).get('nome','Cliente')}**")
+    st.write(f'Novo status: **{novo_status}**')
+    agenda_nova=None
+    if novo_status=='Pedido de venda':
+        ag=registro.get('agendamento') or {}
+        local=st.text_input('Endereço/local do trabalho',value=ag.get('local',''),
+                           key=f'ag_local_{numero}')
+        servico=st.text_area('Serviço que será executado',value=ag.get('servico','') or descricao_agendamento(registro),
+                             key=f'ag_servico_{numero}',height=75)
+        observacoes=st.text_input('Observações',value=ag.get('observacoes',''),key=f'ag_obs_{numero}')
+        agendar_agora=st.checkbox('Definir data e horário agora',value=True,key=f'ag_agendar_{numero}')
+        if agendar_agora:
+            try:
+                disponibilidade=carregar_disponibilidade_agenda()
+                # A escolha do serviço também determina quais datas são bloqueadas por chuva.
+                temporario=copy.deepcopy(registro)
+                temporario['agendamento']={'servico':servico, **{k:v for k,v in ag.items() if k!='servico'}}
+                horario=seletor_horarios_agenda(numero,temporario,registros,disponibilidade,'confirmar')
+                if horario:
+                    agenda_nova={**horario,'local':local.strip(),'servico':servico.strip(),
+                                 'observacoes':observacoes.strip(),'realizado':False}
+            except Exception as e:
+                st.error(f'Erro ao buscar horários: {e}')
+        else:
+            st.info('O pedido ficará na agenda como Pendente de agendamento, até escolher uma data.')
+            agenda_nova={'local':local.strip(),'servico':servico.strip(),
+                         'observacoes':observacoes.strip(),'realizado':False,
+                         'pendente_agendamento':True}
+    c1,c2=st.columns(2)
     with c1:
-        if st.button("Cancelar", use_container_width=True, key=f"cancel_status_{numero}"):
+        if st.button('Cancelar',use_container_width=True,key=f'cancel_status_{numero}'):
             st.rerun()
     with c2:
-        if st.button("Confirmar", type="primary", use_container_width=True, key=f"ok_status_{numero}"):
-            if novo_status == "Pedido de venda" and agenda_nova is None:
-                st.error("Informe data, horário, local e serviço e confirme o agendamento.")
-                return
-            if novo_status == "Pedido de venda":
-                registro["agendamento"] = agenda_nova
+        if st.button('Confirmar',type='primary',use_container_width=True,key=f'ok_status_{numero}'):
+            if novo_status=='Pedido de venda':
+                if not (agenda_nova and agenda_nova.get('local') and agenda_nova.get('servico')):
+                    st.error('Preencha local e serviço e escolha um horário livre, ou marque Pendente de agendamento.')
+                    return
+                if agenda_nova.get('data'):
+                    disp=carregar_disponibilidade_agenda()
+                    dia=date.fromisoformat(agenda_nova['data'])
+                    temporario=copy.deepcopy(registro)
+                    temporario['agendamento']=agenda_nova
+                    candidatos=horarios_livres_agenda(dia,agenda_nova['duracao_minutos'],registros,disp,
+                                registro_id=numero,instalacao=eh_instalacao_agenda(temporario))
+                    if agenda_nova['hora'] not in candidatos:
+                        st.error('Este horário deixou de estar disponível. Escolha outro intervalo.')
+                        return
+                registro['agendamento']=agenda_nova
             try:
-                alterar_status_orcamento(registros, registro, novo_status, carregar_financeiro(), pagamento=pagamento)
-                st.session_state["mensagem_status_ok"] = f"Documento #{numero} atualizado."
+                alterar_status_orcamento(registros,registro,novo_status,carregar_financeiro(),pagamento=pagamento)
                 st.rerun()
             except Exception as e:
-                st.error(f"Não foi possível confirmar: {e}")
+                st.error(f'Não foi possível confirmar: {e}')
 
 
 @st.dialog("Editar agendamento")
 def editar_agendamento_pedido(numero):
-    registros = carregar_orcamentos()
-    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
-    if not registro or registro.get("status") != "Pedido de venda":
-        st.warning("Pedido não disponível.")
+    registros=carregar_orcamentos()
+    registro=next((r for r in registros if str(r.get('numero','')).zfill(4)==str(numero).zfill(4)),None)
+    if registro is None or registro.get('status')!='Pedido de venda':
+        st.warning('Pedido não disponível.')
         return
-    ag = registro.get("agendamento") or {}
+    ag=registro.get('agendamento') or {}
+    local=st.text_input('Endereço/local',value=ag.get('local',''),key=f'edi_ag_loc_{numero}')
+    servico=st.text_area('Serviço',value=ag.get('servico','') or descricao_agendamento(registro),key=f'edi_ag_serv_{numero}')
+    obs=st.text_input('Observações',value=ag.get('observacoes',''),key=f'edi_ag_obs_{numero}')
     try:
-        valor_data = date.fromisoformat(ag.get("data", ""))
-    except (ValueError, TypeError):
-        valor_data = datetime.now(FUSO_BRASILIA).date()
-    dia = st.date_input("Data *", value=valor_data, key=f"edi_ag_data_{numero}")
-    try:
-        valor_hora = datetime.strptime(ag.get("hora", "09:00"), "%H:%M").time()
-    except (ValueError, TypeError):
-        valor_hora = datetime.strptime("09:00", "%H:%M").time()
-    hora = st.time_input("Horário *", value=valor_hora, key=f"edi_ag_hora_{numero}")
-    local = st.text_input("Local *", value=ag.get("local", ""), key=f"edi_ag_loc_{numero}")
-    servico = st.text_area("Serviço *", value=ag.get("servico", "") or descricao_agendamento(registro), key=f"edi_ag_serv_{numero}")
-    obs = st.text_input("Observações", value=ag.get("observacoes", ""), key=f"edi_ag_obs_{numero}")
-    a, b = st.columns(2)
+        disponibilidade=carregar_disponibilidade_agenda()
+        temporario=copy.deepcopy(registro)
+        temporario['agendamento']={**ag,'servico':servico}
+        novo=seletor_horarios_agenda(numero,temporario,registros,disponibilidade,'edi')
+    except Exception as e:
+        st.error(f'Erro ao carregar agenda: {e}')
+        return
+    a,b=st.columns(2)
     with a:
-        if st.button("Cancelar", key=f"canc_ag_{numero}", use_container_width=True):
+        if st.button('Cancelar',use_container_width=True,key=f'canc_ag_{numero}'):
             st.rerun()
     with b:
-        if st.button("Salvar agendamento", key=f"save_ag_{numero}", type="primary", use_container_width=True):
-            if not local.strip() or not servico.strip():
-                st.error("Informe local e serviço.")
+        if st.button('Salvar agendamento',type='primary',use_container_width=True,key=f'save_ag_{numero}'):
+            if not novo or not local.strip() or not servico.strip():
+                st.error('Informe serviço, local e escolha um horário livre.')
                 return
-            registro["agendamento"] = {"data": dia.isoformat(), "hora": hora.strftime("%H:%M"), "local": local.strip(), "servico": servico.strip(), "observacoes": obs.strip()}
+            dia=date.fromisoformat(novo['data'])
+            temporario['agendamento']={**novo,'servico':servico}
+            if novo['hora'] not in horarios_livres_agenda(dia,novo['duracao_minutos'],registros,
+                  disponibilidade,registro_id=numero,instalacao=eh_instalacao_agenda(temporario)):
+                st.error('Horário ocupado ou indisponível. Selecione outro.')
+                return
+            registro['agendamento']={**ag,**novo,'local':local.strip(),'servico':servico.strip(),
+                                    'observacoes':obs.strip(),'pendente_agendamento':False}
             salvar_orcamentos(registros)
             st.rerun()
+
+
+@st.dialog('Impedimento · reagendar serviço')
+def reagendar_por_impedimento(numero):
+    """Nunca deixa o pedido sem horário: grava motivo e novo horário juntos."""
+    registros=carregar_orcamentos()
+    registro=next((r for r in registros if str(r.get('numero','')).zfill(4)==str(numero).zfill(4)),None)
+    if not registro or registro.get('status')!='Pedido de venda':
+        st.warning('Pedido indisponível para reagendar.')
+        return
+    ag=registro.get('agendamento') or {}
+    antigo=data_hora_agendamento(registro)
+    st.write(f"**{registro.get('cliente',{}).get('nome','Cliente')}** · Pedido #{numero}")
+    if antigo:
+        st.caption(f"Agendado anteriormente: {antigo.strftime('%d/%m/%Y %H:%M')}")
+    motivo=st.selectbox('Por que o serviço não poderá ser feito?',
+         ['Chuva / mau tempo','Compromisso no outro trabalho','Indisponibilidade do cliente',
+          'Falta de material','Outro motivo'],key=f'imp_motivo_{numero}')
+    detalhe=st.text_input('Detalhes (opcional)',key=f'imp_detalhe_{numero}')
+    st.info('Escolha outro dia e horário disponível. O agendamento antigo só será substituído depois da confirmação.')
+    try:
+        disponibilidade=carregar_disponibilidade_agenda()
+        novo=seletor_horarios_agenda(numero,registro,registros,disponibilidade,'reagendar')
+    except Exception as e:
+        st.error(f'Não foi possível consultar os horários: {e}')
+        return
+    a,b=st.columns(2)
+    with a:
+        if st.button('Cancelar',use_container_width=True,key=f'cancelar_imp_{numero}'):
+            st.rerun()
+    with b:
+        if st.button('Confirmar novo agendamento',type='primary',use_container_width=True,key=f'ok_imp_{numero}'):
+            if not novo:
+                st.error('Selecione uma data e um horário livre. O pedido não será deixado pendente.')
+                return
+            dia=date.fromisoformat(novo['data'])
+            if antigo and antigo.date()==dia and antigo.strftime('%H:%M')==novo['hora']:
+                st.error('Escolha um horário diferente do compromisso que está sendo remarcado.')
+                return
+            if novo['hora'] not in horarios_livres_agenda(dia,novo['duracao_minutos'],registros,
+                disponibilidade,registro_id=numero,instalacao=eh_instalacao_agenda(registro)):
+                st.error('Horário não está mais livre. Escolha outra opção.')
+                return
+            hist=ag.get('historico_reagendamentos',[])
+            hist.append({'data_anterior':ag.get('data'), 'hora_anterior':ag.get('hora'),
+                        'nova_data':novo['data'], 'nova_hora':novo['hora'],
+                        'motivo':motivo,'detalhes':detalhe.strip(),
+                        'registrado_em':datetime.now(FUSO_BRASILIA).strftime('%d/%m/%Y %H:%M')})
+            registro['agendamento']={**ag,**novo,'historico_reagendamentos':hist,
+                                    'pendente_agendamento':False,'realizado':False}
+            registro['atualizado_em']=datetime.now(FUSO_BRASILIA).strftime('%d/%m/%Y %H:%M')
+            try:
+                salvar_orcamentos(registros)
+                st.rerun()
+            except Exception as e:
+                st.error(f'Não foi possível confirmar o reagendamento: {e}')
 
 
 # =========================================================
@@ -3284,7 +3679,7 @@ def aba_orcamentos():
             if o.get("status") == "Pedido de venda":
                 ag_atual = o.get("agendamento") or {}
                 st.caption(
-                    f"📅 Serviço: {ag_atual.get('data', 'Sem data')} "
+                    f"📅 Serviço: {ag_atual.get('data', 'Pendente de agendamento')} "
                     f"às {ag_atual.get('hora', '--:--')} · "
                     f"{ag_atual.get('local', 'Local não informado')}"
                 )
@@ -5355,7 +5750,7 @@ def historico_servicos_admin(registros):
         return
     st.caption(f"{len(realizados)} serviço(s) realizado(s)")
     for momento, registro in realizados:
-        exibir_compromisso(momento, registro, realizado=True)
+        exibir_compromisso(momento, registro, realizado=True, contexto="historico")
 
 
 def pagina_admin():
@@ -6926,6 +7321,43 @@ def pagina_cliente(interno=False):
             )
             st.caption(f"Cobrança por ponto • {int(quantidades_servicos_pontos[nome_servico])} ponto(s)")
 
+    # Descontos concedidos pelo administrador somente neste orçamento.
+    # Os preços do catálogo permanecem inalterados.
+    descontos_servicos_novo = {}
+    descontos_equipamentos_novo = {}
+    desconto_geral_novo = 0.0
+    with st.expander("Descontos para este orçamento (%)", expanded=False):
+        st.caption("Descontos aplicados somente ao orçamento atual. Não alteram os preços cadastrados.")
+        if situacao_tem_compra(possui):
+            aparelhos_desconto = (
+                [equipamento] if modo_compra == "Escolher um aparelho" and equipamento
+                else opcoes_equipamentos
+            )
+            for aparelho_desc in aparelhos_desconto:
+                eid_desc = str(aparelho_desc.get("id", ""))
+                if not eid_desc:
+                    continue
+                desconto_eq_pct = st.number_input(
+                    f'Desconto no aparelho (%) — {aparelho_desc.get("descricao", "Aparelho")}',
+                    min_value=0.0, max_value=100.0, value=0.0,
+                    step=1.0, format="%.2f", key=f"cliente_desc_eq_{eid_desc}",
+                )
+                descontos_equipamentos_novo[eid_desc] = limitar_percentual(desconto_eq_pct)
+        for nome_desconto_serv in servicos:
+            desconto_serv_pct = st.number_input(
+                f"Desconto no serviço (%) — {nome_desconto_serv}",
+                min_value=0.0, max_value=100.0, value=0.0,
+                step=1.0, format="%.2f", key=f"cliente_desc_serv_{nome_desconto_serv}",
+            )
+            descontos_servicos_novo[nome_desconto_serv] = limitar_percentual(desconto_serv_pct)
+        desconto_geral_novo = st.number_input(
+            "Desconto geral adicional (%)",
+            min_value=0.0, max_value=100.0, value=0.0,
+            step=1.0, format="%.2f", key="cliente_desconto_geral",
+            help="Aplicado sobre o subtotal já descontado dos aparelhos e serviços.",
+        )
+        st.caption("O desconto geral é aplicado depois dos descontos individuais.")
+
     materiais_selecionados = []
 
     materiais_ativos_cliente = {
@@ -7065,6 +7497,69 @@ def pagina_cliente(interno=False):
         key="cliente_cidade",
     )
 
+    # Prévia dos descontos antes de gerar o orçamento, incluindo todos os
+    # itens selecionados e o adicional automático de andar quando aplicável.
+    subtotal_comum_previa = sum(
+        float(mat["quantidade"]) * float(mat["preco"])
+        for mat in materiais_selecionados
+    )
+    if tipo_imovel == "Apartamento" and int(andar) >= 2:
+        subtotal_comum_previa += float(
+            config.get("regras", {}).get("adicional_apartamento_2_mais", 0) or 0
+        )
+
+    def previa_servicos(capacidade_btu):
+        subtotal_servicos = 0.0
+        for nome_previa in servicos:
+            dados_previa = config.get("servicos", {}).get(nome_previa, {})
+            unitario = float(
+                dados_previa.get("precos", {}).get(capacidade_btu, 0) or 0
+            )
+            qtd_previa = float(quantidades_servicos_pontos.get(nome_previa, 1))
+            bruto_previa = unitario * qtd_previa
+            subtotal_servicos += aplicar_desconto(
+                bruto_previa, descontos_servicos_novo.get(nome_previa, 0)
+            )
+        return subtotal_servicos
+
+    with st.container(border=True):
+        st.markdown("**Prévia do orçamento com descontos**")
+        if situacao_tem_compra(possui) and modo_compra == "Comparar aparelhos":
+            for eq_previa in opcoes_equipamentos:
+                cap_previa = eq_previa.get("capacidade")
+                total_previa = subtotal_comum_previa + aplicar_desconto(
+                    eq_previa.get("preco", 0),
+                    descontos_equipamentos_novo.get(str(eq_previa.get("id", "")), 0),
+                )
+                if possui == "Não, quero comprar":
+                    total_previa += previa_servicos(cap_previa)
+                else:
+                    total_previa += previa_servicos(capacidade_existente)
+                total_previa = aplicar_desconto(total_previa, desconto_geral_novo)
+                st.write(f'**{eq_previa.get("descricao", "Aparelho")}** — {dinheiro(total_previa)}')
+            if not opcoes_equipamentos:
+                st.caption("Selecione um aparelho para visualizar os valores.")
+            else:
+                st.caption("Alternativas independentes: não serão somadas entre si.")
+        else:
+            subtotal_previa = subtotal_comum_previa
+            if situacao_tem_compra(possui) and equipamento is not None:
+                subtotal_previa += aplicar_desconto(
+                    equipamento.get("preco", 0),
+                    descontos_equipamentos_novo.get(str(equipamento_id), 0),
+                )
+            cap_servicos_previa = (
+                capacidade_existente if possui == "Já tenho um e também quero comprar outro"
+                else (equipamento.get("capacidade") if equipamento is not None
+                      else capacidade)
+            )
+            subtotal_previa += previa_servicos(cap_servicos_previa)
+            st.metric("Total estimado com descontos", dinheiro(
+                aplicar_desconto(subtotal_previa, desconto_geral_novo)
+            ))
+        if desconto_geral_novo:
+            st.caption(f"Desconto geral adicional: {desconto_geral_novo:g}%")
+
     # Salva automaticamente o andamento no navegador.
     # Se o iPhone suspender/recarregar o Streamlit, os campos podem ser
     # restaurados por até 5 minutos.
@@ -7122,6 +7617,7 @@ def pagina_cliente(interno=False):
                     "equipamento",
                     equipamento.get("preco", 0),
                     origem="equipamento",
+                    desconto_percentual=descontos_equipamentos_novo.get(str(equipamento_id), 0),
                 )
             )
 
@@ -7160,6 +7656,7 @@ def pagina_cliente(interno=False):
                         "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                         valor,
                         origem="servico",
+                        desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                     )
                 )
 
@@ -7175,6 +7672,9 @@ def pagina_cliente(interno=False):
 
             for opcao in opcoes_equipamentos:
                 opcao_final = copy.deepcopy(opcao)
+                opcao_final["desconto_percentual"] = descontos_equipamentos_novo.get(
+                    str(opcao_final.get("id", "")), 0,
+                )
                 cap_opcao = opcao_final.get("capacidade")
                 opcao_final["descricao"] = descricao_equipamento_com_instalacao(
                     opcao_final.get("descricao", "Ar-condicionado")
@@ -7201,6 +7701,7 @@ def pagina_cliente(interno=False):
                                 "quantidade": quantidades_servicos_pontos.get(nome_servico, 1),
                                 "valor_unitario": valor_servico,
                                 "valor": valor_servico * quantidades_servicos_pontos.get(nome_servico, 1),
+                                "desconto_percentual": descontos_servicos_novo.get(nome_servico, 0),
                             }
                         )
 
@@ -7239,6 +7740,7 @@ def pagina_cliente(interno=False):
                             "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             valor,
                             origem="servico",
+                            desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                         )
                     )
 
@@ -7266,6 +7768,7 @@ def pagina_cliente(interno=False):
                             "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             valor,
                             origem="servico",
+                            desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                         )
                     )
             else:
@@ -7277,6 +7780,7 @@ def pagina_cliente(interno=False):
                             "ponto" if servico_cobrado_por_ponto(nome_servico) else "serviço",
                             0,
                             origem="servico",
+                            desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                         )
                     )
 
@@ -7333,6 +7837,7 @@ def pagina_cliente(interno=False):
             "equipamento_id": equipamento_id,
             "modo_compra": modo_compra,
             "status": "Orçamento",
+            "desconto_percentual": limitar_percentual(desconto_geral_novo),
             "opcoes_equipamentos": opcoes_equipamentos,
             "itens": itens,
             "adicional": {
@@ -7359,17 +7864,17 @@ def pagina_cliente(interno=False):
 
     if ultimo:
         numero = ultimo["numero"]
-        total = calcular_total(ultimo.get("itens", []))
+        total = total_orcamento(ultimo)
 
         secao(f"Orçamento {numero}", "Estimativa registrada com sucesso.")
 
         opcoes_pdf = ultimo.get("opcoes_equipamentos", [])
 
         if opcoes_pdf:
-            if total > 0:
+            if calcular_total(ultimo.get("itens", [])) > 0:
                 st.metric(
                     "Itens comuns do orçamento",
-                    dinheiro(total),
+                    dinheiro(calcular_total(ultimo.get("itens", []))),
                 )
             else:
                 st.markdown(
@@ -7380,6 +7885,11 @@ def pagina_cliente(interno=False):
                 )
         else:
             st.metric("Total estimado", dinheiro(total))
+
+        if ultimo.get("desconto_percentual", 0):
+            st.caption(
+                f'Desconto geral aplicado: {limitar_percentual(ultimo.get("desconto_percentual")):g}%'
+            )
 
         for item in ultimo.get("itens", []):
             qtd = float(item.get("quantidade", 0) or 0)
