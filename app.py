@@ -12,6 +12,11 @@ import os
 import copy
 import uuid
 import time
+import hmac
+import hashlib
+import re
+import secrets
+from datetime import date, timedelta
 import hashlib
 from contextlib import contextmanager
 
@@ -2708,6 +2713,259 @@ div[class*="st-key-fc_linha_registro_"] div[data-testid="stHorizontalBlock"] > d
 """
 
 # =========================================================
+# SESSÃO SEGURA E PERSISTENTE DO ADMINISTRADOR
+# =========================================================
+
+ADMIN_SESSION_STORAGE_KEY = "fclima_admin_session_v1"
+ADMIN_SESSION_SECONDS = 14 * 24 * 60 * 60
+
+
+def emitir_token_admin():
+    """Token temporário assinado no servidor; não contém a senha."""
+    validade = int(time.time()) + ADMIN_SESSION_SECONDS
+    nonce = secrets.token_hex(12)
+    corpo = f"{validade}.{nonce}"
+    assinatura = hmac.new(
+        str(ADMIN_KEY).encode("utf-8"), corpo.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{corpo}.{assinatura}"
+
+
+def verificar_token_admin(token):
+    if not ADMIN_KEY or not isinstance(token, str):
+        return False
+    partes = token.split(".")
+    if len(partes) != 3:
+        return False
+    try:
+        validade = int(partes[0])
+    except (ValueError, TypeError):
+        return False
+    if not (time.time() < validade <= time.time() + ADMIN_SESSION_SECONDS + 90):
+        return False
+    corpo = f"{partes[0]}.{partes[1]}"
+    esperado = hmac.new(
+        str(ADMIN_KEY).encode("utf-8"), corpo.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(partes[2], esperado)
+
+
+def restaurar_sessao_admin():
+    if st.session_state.get("admin_logado", False):
+        return True
+    if LOCAL_STORAGE is None:
+        return False
+    try:
+        token = LOCAL_STORAGE.getItem(ADMIN_SESSION_STORAGE_KEY, key="fclima_auth_get")
+        if isinstance(token, dict):
+            token = token.get("token", "")
+        if verificar_token_admin(token):
+            st.session_state["admin_logado"] = True
+            st.session_state["admin_token"] = token
+            st.rerun()
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def persistir_sessao_admin():
+    token = emitir_token_admin()
+    st.session_state["admin_token"] = token
+    if LOCAL_STORAGE is not None:
+        try:
+            LOCAL_STORAGE.setItem(
+                ADMIN_SESSION_STORAGE_KEY, token, key="fclima_auth_set"
+            )
+        except Exception:
+            st.warning("Login autorizado, mas o navegador não permitiu salvar a sessão.")
+
+
+def encerrar_sessao_admin():
+    st.session_state["admin_logado"] = False
+    st.session_state.pop("admin_token", None)
+    if LOCAL_STORAGE is not None:
+        try:
+            LOCAL_STORAGE.setItem(ADMIN_SESSION_STORAGE_KEY, "", key="fclima_auth_clear")
+        except Exception:
+            pass
+
+
+# =========================================================
+# AGENDA DE SERVIÇOS / PEDIDOS CONFIRMADOS
+# =========================================================
+
+
+def data_hora_agendamento(registro):
+    ag = registro.get("agendamento") or {}
+    dia = str(ag.get("data", ""))
+    horario = str(ag.get("hora", ""))
+    try:
+        return datetime.strptime(f"{dia} {horario}", "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return None
+
+
+def descricao_agendamento(registro):
+    ag = registro.get("agendamento") or {}
+    if str(ag.get("servico", "")).strip():
+        return str(ag["servico"]).strip()
+    nomes = [str(item.get("descricao", "")).strip() for item in registro.get("itens", [])]
+    for opcao in registro.get("opcoes_equipamentos", []):
+        nomes.append(str(opcao.get("descricao", "")).strip())
+        nomes.extend(str(sv.get("descricao", "")).strip() for sv in opcao.get("servicos", []))
+    nomes = [n for n in nomes if n]
+    return ", ".join(nomes[:3]) + ("…" if len(nomes) > 3 else "") if nomes else "Serviço conforme pedido"
+
+
+def agenda_admin(registros, *, compacta=False):
+    """Compromissos atuais e futuros, ordenados por data e horário."""
+    agora = datetime.now(FUSO_BRASILIA)
+    hoje = agora.date()
+    proximos, pendentes = [], []
+    for registro in registros:
+        if registro.get("status") != "Pedido de venda":
+            continue
+        momento = data_hora_agendamento(registro)
+        if momento is None:
+            pendentes.append(registro)
+        elif momento.date() >= hoje:
+            proximos.append((momento, registro))
+    proximos.sort(key=lambda par: (par[0], str(par[1].get("numero", ""))))
+
+    st.markdown("### <span style='color:#fff'>📅 Minha agenda</span>", unsafe_allow_html=True)
+    st.caption("Serviços confirmados • Hoje, amanhã e próximos dias")
+    if pendentes:
+        st.warning(f"{len(pendentes)} pedido(s) antigo(s) sem data ou horário. Abra Orçamentos para agendar.")
+
+    grupos = [
+        ("HOJE", hoje, "#ff9c35"),
+        ("AMANHÃ", hoje + timedelta(days=1), "#65b5ff"),
+        ("DEPOIS DE AMANHÃ", hoje + timedelta(days=2), "#8ed3aa"),
+    ]
+    vistos = set()
+    for nome_grupo, dia, destaque in grupos:
+        itens = [(dt, r) for dt, r in proximos if dt.date() == dia]
+        vistos.update(str(r.get("numero", "")) for _, r in itens)
+        st.markdown(f"<div style='font-size:13px;font-weight:900;color:{destaque};margin-top:10px'>{nome_grupo} · {dia.strftime('%d/%m')}</div>", unsafe_allow_html=True)
+        if not itens:
+            st.caption("Sem serviços agendados.")
+        for dt, r in itens:
+            exibir_compromisso(dt, r)
+
+    restantes = [(dt, r) for dt, r in proximos if str(r.get("numero", "")) not in vistos]
+    if restantes:
+        with st.expander(f"Próximos agendamentos ({len(restantes)})", expanded=not compacta):
+            for dt, r in restantes:
+                exibir_compromisso(dt, r)
+    if not proximos and not pendentes:
+        st.caption("Nenhum serviço pendente agendado.")
+
+
+def exibir_compromisso(dt, registro):
+    from html import escape
+    nome = escape(str(registro.get("cliente", {}).get("nome", "Cliente")))
+    ag = registro.get("agendamento") or {}
+    cidade = registro.get("cliente", {}).get("cidade", "")
+    local = escape(str(ag.get("local", "") or cidade or "Local não informado"))
+    servico = escape(descricao_agendamento(registro))
+    numero = escape(str(registro.get("numero", "")).zfill(4))
+    st.markdown(
+        f"<div style='margin:6px 0 10px;padding:12px 14px;border:1px solid #25466e;"
+        f"border-left:4px solid #ff821d;border-radius:13px;background:#101a2a'>"
+        f"<div style='font-weight:850;color:#fff;font-size:15px'>"
+        f"{dt.strftime('%d/%m')} · {dt.strftime('%H:%M')} — {nome}</div>"
+        f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico}</div>"
+        f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero}</div>"
+        f"</div>", unsafe_allow_html=True,
+    )
+
+
+@st.dialog("Confirmar alteração do pedido")
+def confirmar_status_com_agenda(numero, novo_status, pagamento):
+    registros = carregar_orcamentos()
+    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
+    if registro is None:
+        st.error("Documento não encontrado.")
+        return
+    st.write(f"Documento **#{numero}** · **{registro.get('cliente', {}).get('nome', 'Cliente')}**")
+    st.write(f"Novo status: **{novo_status}**")
+    ag = registro.get("agendamento") or {}
+    agenda_nova = None
+    if novo_status == "Pedido de venda":
+        st.info("Para confirmar o pedido, informe obrigatoriamente quando e onde será o serviço.")
+        data_inicial = datetime.now(FUSO_BRASILIA).date()
+        try:
+            data_inicial = date.fromisoformat(ag.get("data", ""))
+        except (TypeError, ValueError):
+            pass
+        dia = st.date_input("Data do serviço *", value=data_inicial, key=f"ag_data_{numero}")
+        hora = st.time_input("Horário do serviço *", value=datetime.strptime(ag.get("hora", "09:00"), "%H:%M").time() if re.fullmatch(r"\d{2}:\d{2}", str(ag.get("hora", ""))) else datetime.strptime("09:00", "%H:%M").time(), step=1800, key=f"ag_hora_{numero}")
+        local = st.text_input("Endereço/local do trabalho *", value=ag.get("local", ""), placeholder="Rua, número, bairro, cidade", key=f"ag_local_{numero}")
+        servico = st.text_area("O que será feito *", value=ag.get("servico", "") or descricao_agendamento(registro), height=80, key=f"ag_servico_{numero}")
+        obs = st.text_input("Observações da visita", value=ag.get("observacoes", ""), key=f"ag_obs_{numero}")
+        confirmou_horario = st.checkbox(
+            "Confirmei a data e o horário com o cliente",
+            key=f"ag_confirmei_data_{numero}",
+        )
+        if confirmou_horario and dia and hora and local.strip() and servico.strip():
+            agenda_nova = {"data": dia.isoformat(), "hora": hora.strftime("%H:%M"), "local": local.strip(), "servico": servico.strip(), "observacoes": obs.strip()}
+    st.caption("A alteração será gravada somente após a confirmação abaixo.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Cancelar", use_container_width=True, key=f"cancel_status_{numero}"):
+            st.rerun()
+    with c2:
+        if st.button("Confirmar", type="primary", use_container_width=True, key=f"ok_status_{numero}"):
+            if novo_status == "Pedido de venda" and agenda_nova is None:
+                st.error("Informe data, horário, local e serviço e confirme o agendamento.")
+                return
+            if novo_status == "Pedido de venda":
+                registro["agendamento"] = agenda_nova
+            try:
+                alterar_status_orcamento(registros, registro, novo_status, carregar_financeiro(), pagamento=pagamento)
+                st.session_state["mensagem_status_ok"] = f"Documento #{numero} atualizado."
+                st.rerun()
+            except Exception as e:
+                st.error(f"Não foi possível confirmar: {e}")
+
+
+@st.dialog("Editar agendamento")
+def editar_agendamento_pedido(numero):
+    registros = carregar_orcamentos()
+    registro = next((r for r in registros if str(r.get("numero", "")).zfill(4) == str(numero).zfill(4)), None)
+    if not registro or registro.get("status") != "Pedido de venda":
+        st.warning("Pedido não disponível.")
+        return
+    ag = registro.get("agendamento") or {}
+    try:
+        valor_data = date.fromisoformat(ag.get("data", ""))
+    except (ValueError, TypeError):
+        valor_data = datetime.now(FUSO_BRASILIA).date()
+    dia = st.date_input("Data *", value=valor_data, key=f"edi_ag_data_{numero}")
+    try:
+        valor_hora = datetime.strptime(ag.get("hora", "09:00"), "%H:%M").time()
+    except (ValueError, TypeError):
+        valor_hora = datetime.strptime("09:00", "%H:%M").time()
+    hora = st.time_input("Horário *", value=valor_hora, key=f"edi_ag_hora_{numero}")
+    local = st.text_input("Local *", value=ag.get("local", ""), key=f"edi_ag_loc_{numero}")
+    servico = st.text_area("Serviço *", value=ag.get("servico", "") or descricao_agendamento(registro), key=f"edi_ag_serv_{numero}")
+    obs = st.text_input("Observações", value=ag.get("observacoes", ""), key=f"edi_ag_obs_{numero}")
+    a, b = st.columns(2)
+    with a:
+        if st.button("Cancelar", key=f"canc_ag_{numero}", use_container_width=True):
+            st.rerun()
+    with b:
+        if st.button("Salvar agendamento", key=f"save_ag_{numero}", type="primary", use_container_width=True):
+            if not local.strip() or not servico.strip():
+                st.error("Informe local e serviço.")
+                return
+            registro["agendamento"] = {"data": dia.isoformat(), "hora": hora.strftime("%H:%M"), "local": local.strip(), "servico": servico.strip(), "observacoes": obs.strip()}
+            salvar_orcamentos(registros)
+            st.rerun()
+
+
+# =========================================================
 # ADMIN - ORÇAMENTOS
 # =========================================================
 
@@ -2754,10 +3012,32 @@ def confirmar_exclusao_orcamento(numero):
             st.rerun()
 
 
+@st.dialog("Confirmar reinicialização da base")
+def confirmar_reset_base_dialog():
+    st.error("Esta ação removerá TODOS os registros comerciais ativos e os lançamentos financeiros.")
+    st.caption("Um backup privado será criado antes da operação. Os custos dos cadastros serão preservados.")
+    confirmacao = st.text_input("Digite RESETAR para confirmar", key="dialog_confirmar_reset")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Cancelar", key="dialog_reset_cancelar", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button("Confirmar reset", key="dialog_reset_ok", type="primary", use_container_width=True):
+            if confirmacao.strip().upper() != "RESETAR":
+                st.error("Digite RESETAR.")
+                return
+            try:
+                caminho = resetar_base_orcamentos()
+                st.session_state["msg_reset_base"] = f"Base reiniciada. Backup: {caminho}"
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível reiniciar: {exc}")
+
+
 def aba_orcamentos():
     secao(
-        "Gestão comercial",
-        "Orçamentos, pedidos confirmados e vendas concluídas em listas separadas.",
+        "Orçamentos",
+        "Consulte, edite, confirme pedidos e exclua documentos em um só lugar.",
     )
 
     with tela_carregamento("Carregando gestão comercial..."):
@@ -2768,32 +3048,12 @@ def aba_orcamentos():
     if aviso_exclusao:
         st.success(aviso_exclusao)
 
+    if st.session_state.pop("msg_reset_base", None):
+        st.success("Base reiniciada com backup privado.")
     with st.expander("Ferramentas da base"):
-        st.caption(
-            "O reset arquiva todos os orçamentos e movimentações atuais no repositório privado, "
-            "limpa a base ativa e reinicia a numeração em 0001."
-        )
-        confirmar_reset = st.text_input(
-            'Para resetar, digite RESETAR',
-            key="confirmar_reset_base",
-        )
-        if st.button(
-            "RESETAR BASE DE ORÇAMENTOS",
-            use_container_width=True,
-            key="btn_reset_base_orcamentos",
-        ):
-            if confirmar_reset.strip().upper() != "RESETAR":
-                st.warning("Digite RESETAR para confirmar.")
-            else:
-                try:
-                    with tela_carregamento("Arquivando dados e reiniciando numeração..."):
-                        arquivo = resetar_base_orcamentos()
-                    st.success(
-                        f"Base reiniciada em 0001. Backup preservado em {arquivo}."
-                    )
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Não foi possível resetar a base: {e}")
+        st.caption("Para reiniciar o contador e apagar os registros ativos, é necessária confirmação.")
+        if st.button("Reiniciar base (com backup)", key="btn_reset_base_orcamentos"):
+            confirmar_reset_base_dialog()
 
     if not orcamentos:
         st.info("Nenhum registro comercial salvo ainda.")
@@ -2900,6 +3160,16 @@ def aba_orcamentos():
                 f"{o.get('cliente',{}).get('telefone','')} • "
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
+
+            if o.get("status") == "Pedido de venda":
+                ag_atual = o.get("agendamento") or {}
+                st.caption(
+                    f"📅 Serviço: {ag_atual.get('data', 'Sem data')} "
+                    f"às {ag_atual.get('hora', '--:--')} · "
+                    f"{ag_atual.get('local', 'Local não informado')}"
+                )
+                if st.button("📅 Editar data / horário / local", key=f"editar_ag_pedido_{numero}"):
+                    editar_agendamento_pedido(numero)
 
             status_opcoes = [
                 "Orçamento",
@@ -3021,18 +3291,7 @@ def aba_orcamentos():
                     use_container_width=True,
                     key=f"adm_aplicar_status_{numero}",
                 ):
-                    try:
-                        alterar_status_orcamento(
-                            orcamentos,
-                            o,
-                            novo_status,
-                            financeiro,
-                            pagamento=pagamento_status,
-                        )
-                        st.success("Status atualizado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao alterar status: {e}")
+                    confirmar_status_com_agenda(numero, novo_status, pagamento_status)
 
             # ---------------------------------------------
             # DESCONTO GERAL
@@ -3769,17 +4028,8 @@ def aba_servicos():
                             key=f"serv_preco_{idx}_{nome}_{cap}",
                         )
 
-            excluir = st.checkbox(
-                "Excluir este serviço",
-                value=False,
-                key=f"serv_excluir_{idx}_{nome}",
-            )
-
-            if excluir:
-                st.caption(
-                    "Ao salvar as alterações do sistema, este serviço será removido do catálogo."
-                )
-                continue
+            if st.button("Excluir serviço", key=f"serv_excluir_{idx}_{nome}"):
+                confirmar_exclusao_servico(nome)
 
             chave_final = novo_nome or nome
 
@@ -3874,6 +4124,58 @@ def aba_servicos():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar serviço: {e}")
+
+
+@st.dialog("Excluir serviço")
+def confirmar_exclusao_servico(nome):
+    st.warning(f"Excluir permanentemente **{nome}** do catálogo de serviços?")
+    st.caption("Orçamentos emitidos permanecem no histórico.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Cancelar", key="cancelar_servico_dialog", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button("Excluir definitivamente", key="excluir_servico_dialog", type="primary", use_container_width=True):
+            if nome not in config.get("servicos", {}):
+                st.warning("Serviço não encontrado.")
+                return
+            original = copy.deepcopy(config["servicos"])
+            config["servicos"].pop(nome, None)
+            try:
+                salvar_config()
+                st.session_state["_autosave_sig_painel"] = assinatura_dados(config)
+                st.rerun()
+            except Exception as exc:
+                config["servicos"] = original
+                st.error(f"Não foi possível excluir: {exc}")
+
+
+@st.dialog("Excluir aparelho")
+def confirmar_exclusao_aparelho(eid):
+    aparelho = config.get("equipamentos", {}).get(str(eid))
+    if not aparelho:
+        st.warning("Aparelho não encontrado.")
+        return
+    st.warning(f"Excluir permanentemente **{nome_equipamento(aparelho)}**?")
+    st.caption("O aparelho deixa de aparecer em novos orçamentos. Documentos anteriores permanecem.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Cancelar", key="cancel_eq_dialog", use_container_width=True):
+            st.rerun()
+    with c2:
+        if st.button("Excluir definitivamente", key="ok_eq_dialog", type="primary", use_container_width=True):
+            anterior = copy.deepcopy(config["equipamentos"])
+            config["equipamentos"].pop(str(eid), None)
+            try:
+                salvar_config()
+                fin = carregar_financeiro()
+                fin.setdefault("custos_equipamentos", {}).pop(str(eid), None)
+                salvar_financeiro(fin)
+                st.session_state["_autosave_sig_painel"] = assinatura_dados(config)
+                st.rerun()
+            except Exception as exc:
+                config["equipamentos"] = anterior
+                st.error(f"Falha na exclusão: {exc}")
 
 
 # =========================================================
@@ -4206,12 +4508,8 @@ def aba_aparelhos():
 
             st.caption(f"Descrição automática: {nome_equipamento(eq)}")
 
-            if st.checkbox("Excluir este aparelho", key=f"eq_del_{eid}"):
-                remover.append(eid)
-
-    for eid in remover:
-        config["equipamentos"].pop(eid, None)
-        custos_privados.pop(str(eid), None)
+            if st.button("Excluir aparelho", key=f"eq_del_{eid}"):
+                confirmar_exclusao_aparelho(eid)
 
     st.markdown("#### Criar novo aparelho")
 
@@ -4860,146 +5158,111 @@ def pagina_central_faturamento():
 
 
 
-def aba_edicao_rapida_orcamentos():
-    """Atalho no ADM para edição completa dos orçamentos, sem misturar status."""
-    secao("Orçamentos", "Localize um orçamento e abra a edição completa por aqui.")
+def aba_gestao_comercial():
+    """Painel comercial enxuto, sem repetir a listagem de orçamentos."""
+    secao("Gestão comercial", "Resumo dos resultados e serviços em andamento.")
     registros = carregar_orcamentos()
-    if not registros:
-        st.info("Nenhum orçamento cadastrado.")
-        return
-
-    termo = st.text_input(
-        "Buscar orçamento por número, cliente ou telefone",
-        key="adm_editor_busca_rapida",
-    ).strip().casefold()
-    candidatos = sorted(
-        registros,
-        key=lambda item: str(item.get("numero", "")), reverse=True,
-    )
-    if termo:
-        candidatos = [r for r in candidatos if termo in " ".join([
-            str(r.get("numero", "")),
-            str(r.get("cliente", {}).get("nome", "")),
-            str(r.get("cliente", {}).get("telefone", "")),
-        ]).casefold()]
-
-    selecionado = st.session_state.get("orcamento_cliente_em_edicao")
-    for r in candidatos:
-        numero = str(r.get("numero", "")).zfill(4)
-        cliente = r.get("cliente", {}).get("nome", "Cliente")
-        status = r.get("status", "Orçamento")
-        c_resumo, c_abrir = st.columns([4, 1], vertical_alignment="center")
-        with c_resumo:
-            st.caption(f"**#{numero}** · {cliente} · {status}")
-        with c_abrir:
-            if st.button("Editar", key=f"adm_rapido_editar_{numero}", use_container_width=True):
-                st.session_state["orcamento_cliente_em_edicao"] = numero
-                st.rerun()
-
-    if selecionado and any(str(r.get("numero", "")).zfill(4) == str(selecionado).zfill(4) for r in registros):
-        st.divider()
-        st.caption(f"Editando orçamento #{str(selecionado).zfill(4)}")
-        editor_orcamento_cliente()
+    totais = {"Orçamento": 0, "Pedido de venda": 0, "Faturado / Concluído": 0}
+    for registro in registros:
+        estado = registro.get("status", "Orçamento")
+        if estado in totais:
+            totais[estado] += 1
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Orçamentos", totais["Orçamento"])
+    c2.metric("Pedidos", totais["Pedido de venda"])
+    c3.metric("Concluídas", totais["Faturado / Concluído"])
+    financeiro = carregar_financeiro()
+    previstos = [r for r in registros if r.get("status") == "Pedido de venda"]
+    receita_prevista = sum(estimar_resultado_pedido(r, financeiro)["receita"] for r in previstos)
+    custo_previsto = sum(estimar_resultado_pedido(r, financeiro)["custo"] for r in previstos)
+    concluidos = [r for r in registros if r.get("status") == "Faturado / Concluído"]
+    receita_realizada = sum(total_orcamento(r) for r in concluidos if len(r.get("opcoes_equipamentos", [])) <= 1)
+    st.markdown("#### Resumo financeiro")
+    st.metric("Receita prevista de pedidos", dinheiro(receita_prevista))
+    st.metric("Lucro previsto de pedidos", dinheiro(receita_prevista - custo_previsto))
+    st.metric("Valor das vendas concluídas", dinheiro(receita_realizada))
+    st.caption("Previsões não são recebimentos. A Central de Faturamento contém os detalhes e filtros por período.")
 
 
 def pagina_admin():
-    cabecalho(admin=True)
-
-    if st.button("← Voltar para área do cliente", use_container_width=True):
-        st.session_state["pagina"] = "cliente"
-        st.session_state["admin_view"] = "painel"
-        st.query_params.clear()
-        st.rerun()
-
+    # Nunca renderizar informações, cadastros ou orçamento antes da autenticação.
     if not ADMIN_KEY:
-        st.error("ADMIN_KEY não configurada nos Secrets.")
+        st.error("ADMIN_KEY não configurada nos Secrets do Streamlit.")
         return
 
+    if st.session_state.get("admin_logado", False):
+        token = st.session_state.get("admin_token")
+        if not verificar_token_admin(token):
+            encerrar_sessao_admin()
     if not st.session_state.get("admin_logado", False):
-        secao("Acesso administrativo", "Digite a senha para continuar.")
-        senha = st.text_input("Senha", type="password")
-        if st.button("Entrar no painel", type="primary", use_container_width=True):
-            if senha == ADMIN_KEY:
+        restaurar_sessao_admin()
+    if not st.session_state.get("admin_logado", False):
+        cabecalho(admin=True)
+        secao("Acesso restrito", "O aplicativo é exclusivo da administração.")
+        with st.form("login_admin_exclusivo", clear_on_submit=True):
+            senha = st.text_input("Senha administrativa", type="password")
+            entrar = st.form_submit_button("ENTRAR", type="primary", use_container_width=True)
+        if entrar:
+            if hmac.compare_digest(str(senha), str(ADMIN_KEY)):
                 st.session_state["admin_logado"] = True
-                st.session_state["admin_view"] = "painel"
+                persistir_sessao_admin()
                 st.rerun()
             else:
                 st.error("Senha incorreta.")
+        st.caption("Neste dispositivo, o acesso pode permanecer ativo por até 14 dias. Use Sair para encerrá-lo.")
         return
 
     if st.session_state.get("admin_view") == "faturamento":
         pagina_central_faturamento()
         return
 
-    st.markdown(
-        """
-        <div class="info-card">
-          <div class="card-title">Central de Faturamento</div>
-          <div class="card-text">
-            Consulte faturamento, custos, lucro, formas de pagamento
-            e desempenho por mês e ano. Use a atualização da central
-            para sincronizar alterações feitas na Gestão Comercial.
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    cabecalho(admin=True)
+    # A agenda é o primeiro conteúdo após o login.
+    with st.container(border=True):
+        agenda_admin(carregar_orcamentos(), compacta=True)
 
-    if st.button(
-        "ABRIR CENTRAL DE FATURAMENTO",
-        type="primary",
-        use_container_width=True,
-        key="abrir_central_faturamento",
-    ):
+    if st.button("📊 ABRIR CENTRAL DE FATURAMENTO", use_container_width=True, key="abrir_central_faturamento"):
         st.session_state["admin_view"] = "faturamento"
         st.rerun()
 
     st.markdown(ESTILO_LINHAS_ADMIN, unsafe_allow_html=True)
-
-    tabs = st.tabs(
-        [
-            "Gestão comercial",
-            "Orçamentos",
-            "Serviços",
-            "Materiais",
-            "Aparelhos",
-            "Regras",
-            "Empresa",
-        ]
-    )
-
+    tabs = st.tabs([
+        "Novo orçamento",
+        "Orçamentos",
+        "Gestão comercial",
+        "Serviços",
+        "Materiais",
+        "Aparelhos",
+        "Regras",
+        "Empresa",
+    ])
     with tabs[0]:
-        aba_orcamentos()
+        pagina_cliente(interno=True)
     with tabs[1]:
-        aba_edicao_rapida_orcamentos()
+        aba_orcamentos()
     with tabs[2]:
-        aba_servicos()
+        aba_gestao_comercial()
     with tabs[3]:
-        aba_materiais()
+        aba_servicos()
     with tabs[4]:
-        aba_aparelhos()
+        aba_materiais()
     with tabs[5]:
-        aba_regras()
+        aba_aparelhos()
     with tabs[6]:
+        aba_regras()
+    with tabs[7]:
         aba_empresa()
 
     st.divider()
-
     try:
-        salvou_config_auto = autosalvar_config_admin("painel")
-        if salvou_config_auto:
-            st.caption("✓ Alterações do painel salvas automaticamente.")
-        else:
-            st.caption("✓ Salvamento automático do painel ativo.")
+        autosalvar_config_admin("painel")
+        st.caption("✓ Configurações com salvamento automático.")
     except Exception as e:
-        st.error(f"Erro no salvamento automático do painel: {e}")
-
-    if st.button("Sair do administrador", use_container_width=True):
-        st.session_state["admin_logado"] = False
-        st.session_state["pagina"] = "cliente"
-        st.query_params.clear()
+        st.error(f"Erro ao salvar configurações: {e}")
+    if st.button("Sair da administração", key="sair_admin_exclusivo", use_container_width=True):
+        encerrar_sessao_admin()
+        st.session_state["admin_view"] = "painel"
         st.rerun()
-
 
 
 def somente_digitos(valor):
@@ -6095,13 +6358,14 @@ def editor_orcamento_cliente():
         st.rerun()
 
 
-def pagina_cliente():
+def pagina_cliente(interno=False):
     restaurar_rascunho_cliente()
 
     if st.session_state.pop("_mostrar_aviso_rascunho", False):
-        st.info("Seu orçamento em andamento foi restaurado.")
+        st.info("Rascunho do orçamento restaurado.")
 
-    cabecalho(admin=False)
+    if not interno:
+        cabecalho(admin=False)
 
     modo_area_cliente = st.radio(
         "O que deseja fazer?",
@@ -6117,7 +6381,7 @@ def pagina_cliente():
     st.markdown(
         """
         <div class="info-card">
-          <div class="card-title">Orçamento rápido e prático</div>
+          <div class="card-title">Criar novo orçamento</div>
           <div class="card-text">
             Monte uma estimativa inicial. O valor final será confirmado antes do serviço.
           </div>
@@ -7063,28 +7327,10 @@ def pagina_cliente():
         unsafe_allow_html=True,
     )
 
-    with st.expander("Área administrativa"):
-        st.caption("Acesso exclusivo da administração.")
-        if st.button(
-            "Acessar painel administrativo",
-            use_container_width=True,
-        ):
-            st.session_state["pagina"] = "admin"
-            st.query_params["modo"] = "admin"
-            st.rerun()
 
 
 # =========================================================
-# NAVEGAÇÃO
+# ACESSO: EXCLUSIVAMENTE ADMINISTRATIVO
 # =========================================================
 
-if "pagina" not in st.session_state:
-    st.session_state["pagina"] = "cliente"
-
-if st.query_params.get("modo", "") == "admin":
-    st.session_state["pagina"] = "admin"
-
-if st.session_state["pagina"] == "admin":
-    pagina_admin()
-else:
-    pagina_cliente()
+pagina_admin()
