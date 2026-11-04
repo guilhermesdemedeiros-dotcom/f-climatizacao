@@ -674,12 +674,18 @@ def carregar_config_local():
         return copy.deepcopy(DEFAULT_CONFIG)
 
 
+@st.cache_data(ttl=60, max_entries=8, show_spinner=False)
+def _config_normalizada_cache(texto_json):
+    """Não refaz a migração do catálogo quando o arquivo não mudou."""
+    return migrar_config(json.loads(texto_json))
+
+
 def carregar_config():
-    # Dados do ADM vêm do GitHub; o cache é invalidado após gravações.
+    # O dado publicado é obtido do GitHub (cache curto, invalidado após salvar).
     try:
-        remoto = github_get_json_cache(CONFIG_REPO, CONFIG_FILE)
-        if isinstance(remoto, dict):
-            return migrar_config(remoto)
+        texto, _ = github_get_file_cache(CONFIG_REPO, CONFIG_FILE)
+        if texto is not None:
+            return _config_normalizada_cache(texto)
     except Exception:
         pass
     return carregar_config_local()
@@ -691,7 +697,7 @@ def carregar_config():
 # =========================================================
 
 DRAFT_STORAGE_KEY = "f_climatizacao_orcamento_rascunho_v1"
-DRAFT_TTL_SECONDS = 5 * 60
+DRAFT_TTL_SECONDS = 7 * 24 * 60 * 60  # sete dias no mesmo navegador; apagado após salvar orçamento
 
 CLIENT_DRAFT_FIELDS = [
     "cliente_possui",
@@ -735,7 +741,7 @@ def _normalizar_payload_local(raw):
 
 def restaurar_rascunho_cliente():
     """
-    Restaura um rascunho salvo no navegador se ele tiver menos de 5 minutos.
+    Restaura um rascunho salvo no navegador por até sete dias.
     Os dados ficam somente no navegador até o orçamento ser confirmado.
     """
     if LOCAL_STORAGE is None:
@@ -782,8 +788,10 @@ def restaurar_rascunho_cliente():
     for campo, valor in dados.items():
         if (
             campo in CLIENT_DRAFT_FIELDS
-            or str(campo).startswith("cliente_eq_visivel_")
-            or str(campo).startswith("cliente_mat_qtd_")
+            or str(campo).startswith((
+                "cliente_eq_visivel_", "cliente_mat_qtd_", "cliente_pontos_",
+                "cliente_desc_eq_", "cliente_desc_serv_",
+            ))
         ) and campo not in st.session_state:
             st.session_state[campo] = valor
             alterou = True
@@ -797,7 +805,7 @@ def restaurar_rascunho_cliente():
 
 def salvar_rascunho_cliente():
     """
-    Mantém o formulário atual por até 5 minutos no armazenamento local do navegador.
+    Mantém o formulário por até sete dias no armazenamento local do navegador.
     Só grava novamente quando algum campo do formulário muda.
     """
     if LOCAL_STORAGE is None:
@@ -865,7 +873,10 @@ def limpar_rascunho_cliente():
 
     for campo in list(st.session_state.keys()):
         nome_campo = str(campo)
-        if nome_campo.startswith("cliente_eq_visivel_") or nome_campo.startswith("cliente_mat_qtd_"):
+        if nome_campo.startswith((
+            "cliente_eq_visivel_", "cliente_mat_qtd_", "cliente_pontos_",
+            "cliente_desc_eq_", "cliente_desc_serv_",
+        )):
             st.session_state.pop(campo, None)
 
     st.session_state.pop("cliente_equipamentos_selecionados", None)
@@ -892,6 +903,11 @@ def garantir_opcao_valida(chave, opcoes, multiplo=False):
 # =========================================================
 
 def github_request(url, method="GET", data=None):
+    """Consultas curtas com segunda tentativa apenas em falha transitória.
+
+    Gravações não são repetidas automaticamente para evitar operações em
+    duplicidade. Falhas permanentes (403, 404) são retornadas imediatamente.
+    """
     if not GITHUB_TOKEN:
         raise RuntimeError("GITHUB_TOKEN não configurado nos Secrets.")
 
@@ -901,25 +917,32 @@ def github_request(url, method="GET", data=None):
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "F-Climatizacao",
     }
-
     body = None
     if data is not None:
         body = json.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
-
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        detail = ""
+    tentativas = 2 if method == "GET" else 1
+    for indice in range(tentativas):
         try:
-            detail = e.read().decode("utf-8")
-        except Exception:
-            pass
-        raise RuntimeError(f"GitHub API {e.code}: {detail or e.reason}")
+            with urllib.request.urlopen(req, timeout=9) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            detalhes = ""
+            try:
+                detalhes = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            if indice + 1 < tentativas and exc.code in (429, 500, 502, 503, 504):
+                time.sleep(0.3)
+                continue
+            raise RuntimeError(f"GitHub API {exc.code}: {detalhes or exc.reason}") from exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if indice + 1 < tentativas:
+                time.sleep(0.3)
+                continue
+            raise RuntimeError(f"Não foi possível conectar ao GitHub: {exc}") from exc
 
 
 def github_get_file(repo, path):
@@ -967,6 +990,7 @@ def github_put_file(repo, path, text_content, message, sha=None):
     # traz valores atualizados, inclusive em outras telas e no painel inicial.
     github_get_file_cache.clear()
     github_get_json_cache.clear()
+    _config_normalizada_cache.clear()
     return resultado
 
 
@@ -1002,13 +1026,26 @@ def salvar_config():
 def carregar_orcamentos():
     try:
         dados = github_get_json_cache(DATA_REPO, BUDGETS_FILE)
-        return dados if isinstance(dados, list) else []
+        if not isinstance(dados, list):
+            raise ValueError("Formato dos orçamentos inválido ou arquivo não encontrado")
+        st.session_state["_orcamentos_ultima_leitura"] = dados
+        st.session_state["_orcamentos_offline"] = False
+        return dados
     except Exception as e:
+        # Não transformar uma falha da rede em uma base vazia, pois uma próxima
+        # gravação poderia sobrescrever os orçamentos verdadeiros.
+        anterior = st.session_state.get("_orcamentos_ultima_leitura")
+        if isinstance(anterior, list):
+            st.session_state["_orcamentos_offline"] = True
+            st.warning("Conexão instável: mostrando uma cópia dos orçamentos. O salvamento fica protegido até reconectar.")
+            return copy.deepcopy(anterior)
         st.error(f"Não foi possível carregar os orçamentos: {e}")
-        return []
+        st.stop()
 
 
 def salvar_orcamentos(lista):
+    if st.session_state.get("_orcamentos_offline", False):
+        raise RuntimeError("Sem conexão atualizada com os orçamentos. Reconecte antes de salvar para proteger os dados.")
     texto = json.dumps(lista, ensure_ascii=False, indent=2)
     _, sha = github_get_file(DATA_REPO, BUDGETS_FILE)
     github_put_file(
