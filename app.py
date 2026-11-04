@@ -5498,8 +5498,8 @@ def pagina_central_faturamento():
     st.markdown(
         """
         <div class="finance-hero">
-          <div class="finance-kicker">Gestão financeira</div>
-          <div class="finance-title">Central de Faturamento</div>
+          <div class="finance-kicker">Painel comercial e financeiro</div>
+          <div class="finance-title">Gestão financeira</div>
           <div class="finance-sub">
             Acompanhe vendas concluídas, custos de aquisição, lucro, formas de pagamento
             e desempenho por período. Custos alterados em Materiais e Aparelhos
@@ -5509,6 +5509,10 @@ def pagina_central_faturamento():
         """,
         unsafe_allow_html=True,
     )
+
+    # Consolida o resumo comercial nesta mesma tela.
+    aba_gestao_comercial()
+    st.divider()
 
     if st.button(
         "ATUALIZAR DADOS DA CENTRAL",
@@ -6013,7 +6017,7 @@ def pagina_central_faturamento():
 
 def aba_gestao_comercial():
     """Painel comercial enxuto, sem repetir a listagem de orçamentos."""
-    secao("Gestão comercial", "Resumo dos resultados e serviços em andamento.")
+    secao("Visão comercial", "Resumo dos orçamentos, pedidos e vendas.")
     registros = carregar_orcamentos()
     totais = {"Orçamento": 0, "Pedido de venda": 0, "Faturado / Concluído": 0}
     for registro in registros:
@@ -6035,7 +6039,7 @@ def aba_gestao_comercial():
     st.metric("Receita prevista de pedidos", dinheiro(receita_prevista))
     st.metric("Lucro previsto de pedidos", dinheiro(receita_prevista - custo_previsto))
     st.metric("Valor das vendas concluídas", dinheiro(receita_realizada))
-    st.caption("Previsões não são recebimentos. A Central de Faturamento contém os detalhes e filtros por período.")
+    st.caption("Previsões não são recebimentos. Abaixo estão os detalhes e filtros por período.")
 
 
 def painel_semana_admin(registros):
@@ -6171,8 +6175,7 @@ def atalhos_inicio_admin():
         ('vendas', 'Vendas concluídas', ':material/check_circle:'),
         ('realizados', 'Serviços realizados', ':material/handyman:'),
         ('horarios', 'Horários de trabalho', ':material/schedule:'),
-        ('gestao', 'Gestão comercial', ':material/monitoring:'),
-        ('financeiro', 'Central financeira', ':material/bar_chart:'),
+        ('financeiro', 'Gestão financeira', ':material/bar_chart:'),
         ('servicos', 'Serviços', ':material/build:'),
         ('materiais', 'Materiais', ':material/inventory_2:'),
         ('aparelhos', 'Aparelhos', ':material/ac_unit:'),
@@ -6239,8 +6242,8 @@ def pagina_admin():
         return
 
     pagina = st.session_state.get("admin_view", "painel")
-    if pagina == "faturamento":
-        # Compatibilidade com o nome de tela usado anteriormente.
+    if pagina in ("faturamento", "gestao"):
+        # Rotas anteriores abrem o painel unificado.
         pagina = "financeiro"
     if pagina == "financeiro":
         pagina_central_faturamento()
@@ -6266,7 +6269,6 @@ def pagina_admin():
             "pedidos": lambda: aba_orcamentos("Pedidos de venda"),
             "vendas": lambda: aba_orcamentos("Vendas concluídas"),
             "realizados": lambda: historico_servicos_admin(carregar_orcamentos()),
-            "gestao": aba_gestao_comercial,
             "servicos": aba_servicos,
             "materiais": aba_materiais,
             "aparelhos": aba_aparelhos,
@@ -6278,10 +6280,6 @@ def pagina_admin():
             st.session_state["admin_view"] = "painel"
             st.rerun()
         tela()
-        if pagina == "gestao":
-            if st.button("Abrir central de faturamento", icon=":material/bar_chart:", use_container_width=True, key="abrir_central_faturamento"):
-                st.session_state["admin_view"] = "financeiro"
-                st.rerun()
 
     st.divider()
     try:
