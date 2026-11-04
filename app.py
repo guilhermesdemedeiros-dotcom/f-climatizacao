@@ -2870,25 +2870,32 @@ def servico_higienizacao(nome):
 
 
 def servico_com_quantidade(nome):
-    return servico_cobrado_por_ponto(nome) or servico_higienizacao(nome)
+    """Todo serviço cadastrado pode ser contratado uma ou mais vezes."""
+    return True
 
 
 def unidade_servico_orcamento(nome):
+    """Unidade indicada no orçamento e PDF, sem mudar o preço do catálogo."""
     if servico_cobrado_por_ponto(nome):
         return "ponto"
-    if servico_higienizacao(nome):
+    texto = str(nome or "").casefold()
+    if any(termo in texto for termo in (
+        "higieniza", "limpeza", "instala", "desinstala", "gás", "gas",
+        "manutenção", "manutencao",
+    )):
         return "aparelho"
     return "serviço"
 
 
 def descricao_servico_orcamento(nome, capacidade, quantidade):
     qtd = max(1, int(float(quantidade or 1)))
-    if servico_cobrado_por_ponto(nome):
-        descricao = f"{nome} • {qtd} ponto(s)"
-    elif servico_higienizacao(nome):
-        descricao = f"{nome} • {qtd} aparelho(s)"
-    else:
-        descricao = nome
+    unidade = unidade_servico_orcamento(nome)
+    rotulo = {
+        "ponto": "ponto(s)",
+        "aparelho": "aparelho(s)",
+        "serviço": "serviço(s)",
+    }.get(unidade, "unidade(s)")
+    descricao = f"{nome} • {qtd} {rotulo}"
     return f"{descricao} • {capacidade}" if capacidade else f"{descricao} • capacidade a confirmar"
 
 
@@ -4642,9 +4649,9 @@ def aba_orcamentos(status_fixo="Orçamentos"):
 
                             if servico_qtd > 0:
                                 item_para_adicionar = montar_item(
-                                    f"{servico_nome} • {capacidade_serv}",
+                                    descricao_servico_orcamento(servico_nome, capacidade_serv, servico_qtd),
                                     servico_qtd,
-                                    "ponto" if servico_cobrado_por_ponto(servico_nome) else "serviço",
+                                    unidade_servico_orcamento(servico_nome),
                                     preco_servico,
                                     origem="servico",
                                     desconto_percentual=servico_desc,
@@ -6478,8 +6485,9 @@ def editor_orcamento_cliente():
                 if nome_base and nome_base not in servicos_atuais:
                     servicos_atuais.append(nome_base)
                 if nome_base:
+                    quantidade_existente = max(1, float(servico.get("quantidade", 1) or 1))
                     precos_servicos_atuais[nome_base] = float(
-                        servico.get("valor", 0) or 0
+                        servico.get("valor_unitario", float(servico.get("valor", 0) or 0) / quantidade_existente) or 0
                     )
     else:
         for item in itens_atuais:
@@ -6903,11 +6911,14 @@ def editor_orcamento_cliente():
                 if qtd_anterior is None:
                     qtd_anterior = next((int(float(sv.get("quantidade", 1) or 1)) for op in opcoes_atuais
                         for sv in op.get("servicos", []) if str(sv.get("descricao", "")).startswith(nome_servico + " •")), 1)
-                hig = servico_higienizacao(nome_servico) and not servico_cobrado_por_ponto(nome_servico)
+                unidade = unidade_servico_orcamento(nome_servico)
+                rotulo = {"ponto": "pontos", "aparelho": "aparelhos", "serviço": "serviços"}.get(unidade, "unidades")
                 edit_quantidades_pontos[nome_servico] = st.number_input(
-                    f"Quantidade de {'aparelhos' if hig else 'pontos'} — {nome_servico}",
-                    min_value=1, max_value=1000 if hig else 10000, value=max(1, qtd_anterior), step=1,
+                    f"Quantidade de {rotulo} — {nome_servico}",
+                    min_value=1, max_value=10000 if unidade == "ponto" else 1000,
+                    value=max(1, qtd_anterior), step=1,
                     key=f"edit_pontos_{numero}_{nome_servico}",
+                    help="O valor unitário é multiplicado pela quantidade escolhida.",
                 )
 
     # -----------------------------------------------------
@@ -7826,13 +7837,14 @@ def pagina_cliente(interno=False):
     quantidades_servicos_pontos = {}
     for nome_servico in servicos:
         if servico_com_quantidade(nome_servico):
-            hig = servico_higienizacao(nome_servico) and not servico_cobrado_por_ponto(nome_servico)
-            tipo = "aparelhos" if hig else "pontos"
+            unidade = unidade_servico_orcamento(nome_servico)
+            tipo = {"ponto": "pontos", "aparelho": "aparelhos", "serviço": "serviços"}.get(unidade, "unidades")
             quantidade = st.number_input(
                 f"Quantidade de {tipo} — {nome_servico}",
-                min_value=1, max_value=1000 if hig else 10000, value=1, step=1,
+                min_value=1, max_value=10000 if unidade == "ponto" else 1000,
+                value=1, step=1,
                 key=f"cliente_pontos_{nome_servico}",
-                help=f"O valor de cada {('aparelho' if hig else 'ponto')} será multiplicado pela quantidade escolhida.",
+                help=f"O valor unitário por {unidade} será multiplicado pela quantidade escolhida.",
             )
             quantidades_servicos_pontos[nome_servico] = int(quantidade)
             st.caption(f"{int(quantidade)} {tipo} × valor unitário cadastrado • total automático no orçamento")
