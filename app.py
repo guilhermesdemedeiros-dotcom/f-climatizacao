@@ -760,6 +760,21 @@ def restaurar_rascunho_cliente():
 
     payload = _normalizar_payload_local(raw)
     if not payload:
+        # O componente de armazenamento pode devolver None enquanto o JS
+        # inicializa. Evite sobrescrever um rascunho antigo na primeira leitura.
+        # Depois de duas leituras vazias E uma edição humana real, habilite
+        # a gravação de um novo rascunho (sem exigir rascunho anterior).
+        vazias = st.session_state.get("_rascunho_leituras_vazias", 0) + 1
+        st.session_state["_rascunho_leituras_vazias"] = vazias
+        campos_preenchidos = any(
+            str(st.session_state.get(campo, "") or "").strip()
+            for campo in (
+                "cliente_nome", "cliente_telefone", "cliente_cidade",
+                "cliente_observacoes", "cliente_adicional_desc",
+            )
+        )
+        if vazias >= 2 and campos_preenchidos:
+            st.session_state["_rascunho_restaurado"] = True
         return
 
     try:
@@ -806,7 +821,8 @@ def restaurar_rascunho_cliente():
 def salvar_rascunho_cliente():
     """
     Mantém o formulário por até sete dias no armazenamento local do navegador.
-    Só grava novamente quando algum campo do formulário muda.
+    Grava no início do rerun seguinte a cada interação concluída, para que
+    cálculos/consultas posteriores não impeçam o backup.
     """
     if LOCAL_STORAGE is None:
         return
@@ -7381,6 +7397,14 @@ def editor_orcamento_cliente():
 def pagina_cliente(interno=False):
     restaurar_rascunho_cliente()
 
+    # A mudança de um widget chega a session_state ANTES de a página rodar.
+    # Salvar agora evita perder todo o último evento quando a tela demora a
+    # renderizar ou uma consulta externa falha antes do final do formulário.
+    # Nunca gravar antes de a restauração inicial ser concluída, para não
+    # substituir um rascunho ainda armazenado no navegador.
+    if st.session_state.get("_rascunho_restaurado", False):
+        salvar_rascunho_cliente()
+
     if st.session_state.pop("_mostrar_aviso_rascunho", False):
         st.info("Rascunho do orçamento restaurado.")
 
@@ -7999,11 +8023,9 @@ def pagina_cliente(interno=False):
         if desconto_geral_novo:
             st.caption(f"Desconto geral adicional: {desconto_geral_novo:g}%")
 
-    # Salva automaticamente o andamento no navegador.
-    # Se o iPhone suspender/recarregar o Streamlit, os campos podem ser
-    # restaurados por até 5 minutos.
-    salvar_rascunho_cliente()
-
+    # O rascunho já é salvo ANTES da montagem do formulário, a cada
+    # interação concluída. Evita-se uma segunda instância do mesmo componente
+    # de armazenamento local no mesmo rerun (DuplicateElementKey).
     if st.button("GERAR ORÇAMENTO", type="primary", use_container_width=True):
         if not nome_cliente.strip():
             st.warning("Informe o nome do cliente.")
