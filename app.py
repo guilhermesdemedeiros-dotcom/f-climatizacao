@@ -17,7 +17,6 @@ import hashlib
 import re
 import secrets
 from datetime import date, timedelta, time as horario_time
-import hashlib
 from contextlib import contextmanager
 
 try:
@@ -665,13 +664,23 @@ def migrar_config(dados):
     return dados
 
 
-def carregar_config_local():
-    """Configuração apenas para exibir o login, sem consulta remota."""
+@st.cache_data(ttl=600, max_entries=3, show_spinner=False)
+def _config_local_processada(caminho, versao_arquivo):
+    """Lê e normaliza a configuração local uma vez por versão do arquivo."""
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as arquivo:
+        with open(caminho, "r", encoding="utf-8") as arquivo:
             return migrar_config(json.load(arquivo))
     except Exception:
         return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def carregar_config_local():
+    """Carrega o login sem rede e sem reprocessar o catálogo em cada rerun."""
+    try:
+        versao = os.path.getmtime(CONFIG_FILE)
+    except OSError:
+        versao = None
+    return _config_local_processada(CONFIG_FILE, versao)
 
 
 @st.cache_data(ttl=60, max_entries=8, show_spinner=False)
@@ -683,7 +692,7 @@ def _config_normalizada_cache(texto_json):
 def carregar_config():
     # O dado publicado é obtido do GitHub (cache curto, invalidado após salvar).
     try:
-        texto, _ = github_get_file_cache(CONFIG_REPO, CONFIG_FILE)
+        texto, _ = _consulta_sessao_github(CONFIG_REPO, CONFIG_FILE)
         if texto is not None:
             return _config_normalizada_cache(texto)
     except Exception:
@@ -976,12 +985,12 @@ def github_get_file(repo, path):
 # Cache curto em memória: evita múltiplas consultas HTTPS ao GitHub a cada
 # interação do Streamlit. O resultado é copiado pelo Streamlit, impedindo que
 # uma edição em uma tela altere acidentalmente o conteúdo no cache.
-@st.cache_data(ttl=25, max_entries=32, show_spinner=False)
+@st.cache_data(ttl=60, max_entries=32, show_spinner=False)
 def github_get_file_cache(repo, path):
     return github_get_file(repo, path)
 
 
-@st.cache_data(ttl=25, max_entries=32, show_spinner=False)
+@st.cache_data(ttl=60, max_entries=32, show_spinner=False)
 def github_get_json_cache(repo, path):
     """Evita repetir base64/JSON parsing a cada clique ou troca de tela.
 
@@ -990,6 +999,26 @@ def github_get_json_cache(repo, path):
     """
     conteudo, _ = github_get_file_cache(repo, path)
     return json.loads(conteudo) if conteudo is not None else None
+
+
+# Reaproveita leituras já feitas na mesma sessão, por um intervalo curto.
+# Qualquer gravação bem-sucedida invalida as cópias imediatamente.
+# Nenhum dado financeiro é armazenado no navegador do cliente.
+def _consulta_sessao_github(repo, caminho, *, json_decodificado=False):
+    cache_key = (repo, caminho, bool(json_decodificado))
+    agora = time.monotonic()
+    itens = st.session_state.setdefault("_fc_cache_remoto_sessao", {})
+    item = itens.get(cache_key)
+    duracao = 60 if caminho == CONFIG_FILE else 35
+    if item is not None and agora - item[0] < duracao:
+        return copy.deepcopy(item[1])
+
+    if json_decodificado:
+        resultado = github_get_json_cache(repo, caminho)
+    else:
+        resultado = github_get_file_cache(repo, caminho)
+    itens[cache_key] = (agora, copy.deepcopy(resultado))
+    return copy.deepcopy(resultado)
 
 
 def github_put_file(repo, path, text_content, message, sha=None):
@@ -1007,6 +1036,8 @@ def github_put_file(repo, path, text_content, message, sha=None):
     github_get_file_cache.clear()
     github_get_json_cache.clear()
     _config_normalizada_cache.clear()
+    # Revalidar imediatamente depois de qualquer alteração, sem esperar o TTL.
+    st.session_state.pop("_fc_cache_remoto_sessao", None)
     return resultado
 
 
@@ -1041,7 +1072,7 @@ def salvar_config():
 
 def carregar_orcamentos():
     try:
-        dados = github_get_json_cache(DATA_REPO, BUDGETS_FILE)
+        dados = _consulta_sessao_github(DATA_REPO, BUDGETS_FILE, json_decodificado=True)
         if not isinstance(dados, list):
             raise ValueError("Formato dos orçamentos inválido ou arquivo não encontrado")
         st.session_state["_orcamentos_ultima_leitura"] = dados
@@ -1124,7 +1155,7 @@ def extrair_mes_ano(data_texto):
 
 def carregar_financeiro():
     try:
-        dados = github_get_json_cache(DATA_REPO, FINANCE_FILE)
+        dados = _consulta_sessao_github(DATA_REPO, FINANCE_FILE, json_decodificado=True)
 
         if not isinstance(dados, dict):
             dados = {}
@@ -2969,7 +3000,7 @@ DIAS_SEMANA_AGENDA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado
 
 
 def carregar_disponibilidade_agenda():
-    dados = github_get_json_cache(DATA_REPO, AGENDA_FILE)
+    dados = _consulta_sessao_github(DATA_REPO, AGENDA_FILE, json_decodificado=True)
     if dados is None:
         return copy.deepcopy(AGENDA_DEFAULT)
     if not isinstance(dados, dict):
@@ -5509,10 +5540,6 @@ def pagina_central_faturamento():
         """,
         unsafe_allow_html=True,
     )
-
-    # Consolida o resumo comercial nesta mesma tela.
-    aba_gestao_comercial()
-    st.divider()
 
     if st.button(
         "ATUALIZAR DADOS DA CENTRAL",
