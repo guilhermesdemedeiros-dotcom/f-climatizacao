@@ -307,6 +307,6 @@
     "adicional_apartamento_2_mais": 120.0,
     "texto_variacao": "Esta é uma estimativa inicial. O valor final pode variar conforme materiais necessários, acesso, altura, condições do local e avaliação técnica.",
     "texto_equipamento": "O valor do equipamento é uma referência aproximada e pode variar conforme disponibilidade e cotação do fornecedor no dia. O valor final será confirmado antes do fechamento.",
-    "valor_por_km": 0.0
+    "valor_por_km": 0.5
   }
 }
