@@ -65,7 +65,7 @@ ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
 
 CAPACIDADES = ["9.000 BTUs", "12.000 BTUs", "18.000 BTUs", "24.000 BTUs"]
 TIPOS_AR = ["Inverter", "Convencional"]
-UNIDADES_ITEM = ["unidade", "metro", "serviço", "equipamento"]
+UNIDADES_ITEM = ["unidade", "metro", "km", "serviço", "equipamento"]
 FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 REFERENCIA_AREA = {
@@ -728,6 +728,8 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_nome",
     "cliente_telefone",
     "cliente_cidade",
+    "cliente_deslocamento_cobrar_km",
+    "cliente_deslocamento_km_rodados",
     "cliente_desconto_geral",
     "cliente_equipamentos_selecionados",
 ]
@@ -2837,6 +2839,54 @@ def total_orcamento(orcamento):
         subtotal,
         orcamento.get("desconto_percentual", 0),
     )
+
+
+def item_cobranca_km(km_total, tarifa_km):
+    """Tarifa de deslocamento: distância total de ida e volta vezes preço por km."""
+    km_total = float(km_total or 0)
+    tarifa_km = float(tarifa_km or 0)
+    if km_total <= 0 or tarifa_km <= 0:
+        return None
+    return montar_item(
+        "Deslocamento (ida e volta)", km_total, "km", tarifa_km,
+        origem="deslocamento",
+    )
+
+
+def controles_cobranca_km(prefixo, ativo=False, distancia=0.0):
+    """Mesma experiência na criação e na edição; sem digitar formato específico."""
+    cobrar = st.checkbox(
+        "Cobrar km", value=bool(ativo), key=f"{prefixo}_cobrar_km",
+        help="Ative para adicionar o deslocamento ao valor do orçamento.",
+    )
+    km = 0.0
+    tarifa = float(config.get("regras", {}).get("valor_por_km", 0) or 0)
+    if cobrar:
+        km = st.number_input(
+            "Quantos km serão rodados? (ida + volta)",
+            min_value=0.0, max_value=100000.0,
+            value=float(distancia or 0), step=1.0,
+            format="%.1f", key=f"{prefixo}_km_rodados",
+        )
+        st.caption(
+            f"Tarifa do ADM: {dinheiro(tarifa)} / km · "
+            f"Total do deslocamento: {dinheiro(float(km) * tarifa)}"
+        )
+        if tarifa <= 0:
+            st.warning("Defina o valor por km em ADM → Regras antes de cobrar deslocamento.")
+    return cobrar, float(km), tarifa
+
+
+def adicionar_cobranca_km(itens, cobrar, km, tarifa):
+    if not cobrar:
+        return
+    if float(km or 0) <= 0:
+        raise ValueError("Informe quantos km serão rodados (ida e volta).")
+    if float(tarifa or 0) <= 0:
+        raise ValueError("Configure o valor por km em ADM → Regras.")
+    item = item_cobranca_km(km, tarifa)
+    if item is not None:
+        itens.append(item)
 
 
 def montar_item(
@@ -5498,6 +5548,16 @@ def aba_regras():
         value=float(config["regras"].get("adicional_apartamento_2_mais", 0) or 0),
         step=10.0,
     )
+    config["regras"]["valor_por_km"] = st.number_input(
+        "Deslocamento — valor por km rodado (R$)",
+        min_value=0.0,
+        value=float(config["regras"].get("valor_por_km", 0) or 0),
+        step=0.10,
+        format="%.2f",
+        help="Tarifa para o total de quilômetros rodados (ida + volta). Salva automaticamente.",
+        key="regra_valor_por_km",
+    )
+    st.caption("No orçamento, marque Cobrar km e informe a distância total de ida e volta.")
     config["regras"]["texto_variacao"] = st.text_area(
         "Aviso geral de variação do orçamento",
         value=config["regras"].get("texto_variacao", ""),
@@ -6513,7 +6573,7 @@ def editor_orcamento_cliente():
     outros_itens = [
         copy.deepcopy(item)
         for item in itens_atuais
-        if item.get("origem") not in ("servico", "material", "equipamento", "regra")
+        if item.get("origem") not in ("servico", "material", "equipamento", "regra", "deslocamento")
     ]
 
     item_equipamento_atual = next(
@@ -7097,6 +7157,28 @@ def editor_orcamento_cliente():
         )
 
     # -----------------------------------------------------
+    # DESLOCAMENTO / COBRAR KM
+    # -----------------------------------------------------
+    km_item_antigo = next(
+        (it for it in itens_atuais if it.get("origem") == "deslocamento"),
+        None,
+    )
+    deslocamento_antigo = orcamento.get("deslocamento", {})
+    cobrar_km_antigo = bool(km_item_antigo) or bool(
+        deslocamento_antigo.get("cobrar_km", False)
+    )
+    km_antigo = (
+        float(km_item_antigo.get("quantidade", 0) or 0)
+        if km_item_antigo else float(deslocamento_antigo.get("km_rodados", 0) or 0)
+    )
+    with st.expander("Deslocamento / Cobrar km", expanded=cobrar_km_antigo):
+        edit_cobrar_km, edit_km, edit_tarifa_km = controles_cobranca_km(
+            f"edit_deslocamento_{numero}",
+            ativo=cobrar_km_antigo,
+            distancia=km_antigo,
+        )
+
+    # -----------------------------------------------------
     # OUTROS ITENS ANTIGOS / MANUAIS
     # -----------------------------------------------------
 
@@ -7382,6 +7464,14 @@ def editor_orcamento_cliente():
                     )
                 )
 
+        try:
+            adicionar_cobranca_km(
+                novos_itens, edit_cobrar_km, edit_km, edit_tarifa_km
+            )
+        except ValueError as erro_km:
+            st.warning(str(erro_km))
+            return
+
         orcamento["cliente"] = {
             "nome": edit_nome.strip(),
             "telefone": edit_telefone.strip(),
@@ -7417,12 +7507,21 @@ def editor_orcamento_cliente():
             "descricao": edit_adicional_desc.strip(),
         }
         orcamento["observacoes"] = edit_observacoes.strip()
+        orcamento["deslocamento"] = {
+            "cobrar_km": bool(edit_cobrar_km),
+            "km_rodados": float(edit_km if edit_cobrar_km else 0),
+            "valor_por_km": float(edit_tarifa_km if edit_cobrar_km else 0),
+        }
 
         try:
             salvar_orcamento_editado(
                 orcamentos,
                 orcamento,
             )
+            if orcamento.get("status") == "Faturado / Concluído":
+                sincronizar_central_faturamento(
+                    orcamentos, carregar_financeiro()
+                )
             st.success("Orçamento atualizado com sucesso.")
             st.rerun()
         except Exception as e:
@@ -8010,6 +8109,11 @@ def pagina_cliente(interno=False):
         key="cliente_observacoes",
     )
 
+    secao("Deslocamento", "Opcional — tarifa por quilômetro definida em ADM → Regras.")
+    cobrar_km_novo, km_novo, tarifa_km_novo = controles_cobranca_km(
+        "cliente_deslocamento",
+    )
+
     secao("Dados do cliente", "Identifique o cliente para registrar o orçamento.")
 
     nome_cliente = st.text_input(
@@ -8031,6 +8135,8 @@ def pagina_cliente(interno=False):
         float(mat["quantidade"]) * float(mat["preco"])
         for mat in materiais_selecionados
     )
+    if cobrar_km_novo:
+        subtotal_comum_previa += km_novo * tarifa_km_novo
     if tipo_imovel == "Apartamento" and int(andar) >= 2:
         subtotal_comum_previa += float(
             config.get("regras", {}).get("adicional_apartamento_2_mais", 0) or 0
@@ -8342,6 +8448,12 @@ def pagina_cliente(interno=False):
                 )
             )
 
+        try:
+            adicionar_cobranca_km(itens, cobrar_km_novo, km_novo, tarifa_km_novo)
+        except ValueError as erro_km:
+            st.warning(str(erro_km))
+            return
+
         orcamentos = carregar_orcamentos()
         numero = reservar_proximo_numero(orcamentos)
 
@@ -8371,6 +8483,11 @@ def pagina_cliente(interno=False):
                 "descricao": adicional_desc.strip(),
             },
             "observacoes": observacoes.strip(),
+            "deslocamento": {
+                "cobrar_km": bool(cobrar_km_novo),
+                "km_rodados": float(km_novo if cobrar_km_novo else 0),
+                "valor_por_km": float(tarifa_km_novo if cobrar_km_novo else 0),
+            },
         }
 
         try:
