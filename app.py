@@ -4123,6 +4123,71 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                 f"{o.get('cliente',{}).get('cidade','')}"
             )
 
+            # Dados do cliente: editáveis em orçamento e pedido de venda.
+            # Uma venda concluída permanece bloqueada para preservar o registro.
+            if o.get("status", "Orçamento") != "Faturado / Concluído":
+                with st.expander("Editar dados do cliente", expanded=False):
+                    cliente_atual = o.get("cliente") or {}
+                    with st.form(key=f"adm_form_cliente_{numero}"):
+                        nome_editado = st.text_input(
+                            "Nome do cliente",
+                            value=str(cliente_atual.get("nome", "") or ""),
+                            key=f"adm_cliente_nome_{numero}",
+                        )
+                        telefone_editado = st.text_input(
+                            "Telefone / WhatsApp",
+                            value=str(cliente_atual.get("telefone", "") or ""),
+                            key=f"adm_cliente_telefone_{numero}",
+                        )
+                        cidade_editada = st.text_input(
+                            "Cidade",
+                            value=str(cliente_atual.get("cidade", "") or ""),
+                            key=f"adm_cliente_cidade_{numero}",
+                        )
+                        salvar_cliente = st.form_submit_button(
+                            "Salvar dados do cliente",
+                            type="primary",
+                            use_container_width=True,
+                        )
+                    if salvar_cliente:
+                        if not nome_editado.strip() or not telefone_editado.strip():
+                            st.error("Informe o nome e o telefone do cliente.")
+                        else:
+                            try:
+                                # Revalida o status antes de gravar: nunca alterar
+                                # cadastro de uma venda já concluída.
+                                lista_atualizada = carregar_orcamentos()
+                                registro = next(
+                                    (item for item in lista_atualizada
+                                     if str(item.get("numero", "")).zfill(4) == numero),
+                                    None,
+                                )
+                                if registro is None:
+                                    st.error("Registro não encontrado. Atualize a listagem.")
+                                elif registro.get("status", "Orçamento") == "Faturado / Concluído":
+                                    st.warning("Venda concluída: dados do cliente bloqueados.")
+                                else:
+                                    registro.setdefault("cliente", {}).update({
+                                        "nome": nome_editado.strip(),
+                                        "telefone": telefone_editado.strip(),
+                                        "cidade": cidade_editada.strip(),
+                                    })
+                                    registro["atualizado_em"] = datetime.now(
+                                        FUSO_BRASILIA
+                                    ).strftime("%d/%m/%Y %H:%M")
+                                    salvar_orcamentos(lista_atualizada)
+                                    st.success("Dados do cliente atualizados.")
+                                    st.rerun()
+                            except Exception as exc:
+                                st.error(f"Não foi possível salvar o cliente: {exc}")
+            else:
+                with st.expander("Dados do cliente (somente leitura)"):
+                    cliente_atual = o.get("cliente") or {}
+                    st.text(f"Nome: {cliente_atual.get('nome', '')}")
+                    st.text(f"Telefone: {cliente_atual.get('telefone', '')}")
+                    st.text(f"Cidade: {cliente_atual.get('cidade', '')}")
+                    st.caption("Dados bloqueados após a conclusão da venda.")
+
             if o.get("status") == "Pedido de venda":
                 ag_atual = o.get("agendamento") or {}
                 st.caption(
