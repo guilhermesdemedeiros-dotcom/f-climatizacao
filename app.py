@@ -16,6 +16,7 @@ import hmac
 import hashlib
 import re
 import secrets
+import unicodedata
 from datetime import date, timedelta, time as horario_time
 from contextlib import contextmanager
 
@@ -59,6 +60,7 @@ BUDGETS_FILE = "orcamentos.json"
 FINANCE_FILE = "financeiro.json"
 BUDGET_META_FILE = "orcamentos_meta.json"
 AGENDA_FILE = "agenda_disponibilidade.json"
+CLIENTES_FILE = "clientes.json"  # Cadastro privado: jamais salvar no config.json público.
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
@@ -728,6 +730,8 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_nome",
     "cliente_telefone",
     "cliente_cidade",
+    "cliente_modo_cadastro",
+    "cliente_existente_id",
     "cliente_deslocamento_cobrar_km",
     "cliente_deslocamento_km_rodados",
     "cliente_desconto_geral",
@@ -1105,6 +1109,232 @@ def salvar_orcamentos(lista):
         sha=sha,
     )
 
+
+
+# =========================================================
+# CLIENTES PRIVADOS: CADASTRO E HISTÓRICO
+# =========================================================
+
+def _nome_normalizado_cliente(valor):
+    texto = unicodedata.normalize("NFKD", str(valor or ""))
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return " ".join(texto.casefold().split())
+
+
+def _telefone_chave_cliente(valor):
+    digitos = "".join(c for c in str(valor or "") if c.isdigit())
+    if len(digitos) >= 12 and digitos.startswith("55"):
+        digitos = digitos[2:]
+    return digitos if len(digitos) >= 10 else ""
+
+
+def validar_telefone_cliente(valor):
+    """DDD brasileiro + número, sem +55, espaços ou pontuação."""
+    texto = str(valor or "").strip()
+    if not texto.isdigit() or len(texto) not in (10, 11):
+        return False
+    if texto[:2] == "00" or texto[2] == "0":
+        return False
+    return True
+
+
+def conflito_telefone_cliente(telefone, nome, *, cliente_existente=False, ignorar_numero=None):
+    """Consulta clientes privados e TODOS os documentos, inclusive históricos.
+
+    Documentos da mesma pessoa podem compartilhar telefone. Cadastros novos
+    não podem duplicar número de nenhuma pessoa já existente.
+    """
+    chave = _telefone_chave_cliente(telefone)
+    if not chave:
+        return None
+    identificador = _nome_normalizado_cliente(nome)
+    # Se a leitura do cadastro privado falhou, não arriscar um novo cadastro.
+    clientes_privados = carregar_clientes_privados()
+    if st.session_state.get("_clientes_erro_leitura"):
+        raise RuntimeError("Não foi possível conferir os clientes cadastrados. Tente novamente.")
+    registros = carregar_orcamentos()
+    for pessoa in clientes_privados:
+        if _telefone_chave_cliente(pessoa.get("telefone")) != chave:
+            continue
+        if not cliente_existente or _nome_normalizado_cliente(pessoa.get("nome")) != identificador:
+            return pessoa
+    for registro in registros:
+        if ignorar_numero is not None and str(registro.get("numero", "")).zfill(4) == str(ignorar_numero).zfill(4):
+            continue
+        pessoa = registro.get("cliente", {}) or {}
+        if _telefone_chave_cliente(pessoa.get("telefone")) != chave:
+            continue
+        if not cliente_existente or _nome_normalizado_cliente(pessoa.get("nome")) != identificador:
+            return pessoa
+    return None
+
+
+def aviso_telefone_cliente(telefone, nome, *, existente=False, ignorar_numero=None):
+    if not validar_telefone_cliente(telefone):
+        st.error("Informe DDD + número, somente dígitos. Ex.: 54996523476.")
+        return False
+    try:
+        conflito = conflito_telefone_cliente(
+            telefone, nome, cliente_existente=existente, ignorar_numero=ignorar_numero
+        )
+    except RuntimeError as exc:
+        st.error(str(exc))
+        return False
+    if conflito is not None:
+        st.error(
+            f"O telefone {telefone} já está cadastrado para "
+            f"{conflito.get('nome') or 'outro cliente'}. "
+            "Informe outro número ou selecione o cliente existente."
+        )
+        return False
+    return True
+
+
+def url_whatsapp_cliente(cliente):
+    telefone = _telefone_chave_cliente((cliente or {}).get("telefone"))
+    if not validar_telefone_cliente(telefone):
+        return None
+    return "https://wa.me/55" + telefone
+
+
+def _chave_cliente(dados):
+    telefone = _telefone_chave_cliente(dados.get("telefone"))
+    if telefone:
+        return f"telefone:{telefone}"
+    nome = _nome_normalizado_cliente(dados.get("nome"))
+    cidade = _nome_normalizado_cliente(dados.get("cidade"))
+    return f"nome:{nome}|{cidade}" if nome else ""
+
+
+def carregar_clientes_privados():
+    """Cadastro separado no repositório PRIVADO; arquivo opcional na primeira execução."""
+    try:
+        lista = _consulta_sessao_github(
+            DATA_REPO, CLIENTES_FILE, json_decodificado=True
+        )
+        if lista is None:
+            st.session_state.pop("_clientes_erro_leitura", None)
+            return []
+        if not isinstance(lista, list):
+            raise ValueError("Formato inválido de clientes.json")
+        st.session_state.pop("_clientes_erro_leitura", None)
+        return [item for item in lista if isinstance(item, dict)]
+    except Exception as exc:
+        # Não permitir gravar por cima de cadastro inacessível/indisponível.
+        st.session_state["_clientes_erro_leitura"] = str(exc)
+        return []
+
+
+def listar_clientes_para_orcamento():
+    """Inclui dados de TODOS os orçamentos, pedidos e vendas já concluídas."""
+    cadastrados = carregar_clientes_privados()
+    conhecidos = {}
+    for cadastrado in cadastrados:
+        chave = _chave_cliente(cadastrado)
+        if chave:
+            conhecidos[chave] = {
+                "nome": str(cadastrado.get("nome", "") or "").strip(),
+                "telefone": str(cadastrado.get("telefone", "") or "").strip(),
+                "cidade": str(cadastrado.get("cidade", "") or "").strip(),
+            }
+
+    # A leitura do histórico também inclui vendas finalizadas. O cadastro
+    # separado prevalece nos campos preenchidos, sem descartar históricos.
+    for registro in reversed(carregar_orcamentos()):
+        cliente = registro.get("cliente", {}) or {}
+        if not isinstance(cliente, dict):
+            continue
+        chave = _chave_cliente(cliente)
+        if not chave:
+            continue
+        dados = {
+            "nome": str(cliente.get("nome", "") or "").strip(),
+            "telefone": str(cliente.get("telefone", "") or "").strip(),
+            "cidade": str(cliente.get("cidade", "") or "").strip(),
+        }
+        if chave not in conhecidos:
+            conhecidos[chave] = dados
+        else:
+            for campo, valor in dados.items():
+                if not conhecidos[chave].get(campo) and valor:
+                    conhecidos[chave][campo] = valor
+    return dict(sorted(
+        conhecidos.items(),
+        key=lambda par: (_nome_normalizado_cliente(par[1]["nome"]), par[0]),
+    ))
+
+
+def localizar_cliente_duplicado(dados, conhecidos):
+    """Telefone prevalece; sem telefone, compara nome e cidade."""
+    tel = _telefone_chave_cliente(dados.get("telefone"))
+    nome = _nome_normalizado_cliente(dados.get("nome"))
+    cidade = _nome_normalizado_cliente(dados.get("cidade"))
+    for chave, cliente in conhecidos.items():
+        tel_antigo = _telefone_chave_cliente(cliente.get("telefone"))
+        if tel and tel_antigo and tel == tel_antigo:
+            return chave, cliente
+        if nome and nome == _nome_normalizado_cliente(cliente.get("nome")):
+            cidade_antiga = _nome_normalizado_cliente(cliente.get("cidade"))
+            if not cidade or not cidade_antiga or cidade == cidade_antiga:
+                return chave, cliente
+    return None, None
+
+
+def cadastrar_cliente_privado(dados):
+    """Registra sem duplicar. Nunca sobrescreve dados de orçamentos antigos."""
+    if st.session_state.get("_clientes_erro_leitura"):
+        raise RuntimeError("Cadastro privado indisponível; tente novamente após reconectar.")
+    clientes = carregar_clientes_privados()
+    novo = {
+        "nome": str(dados.get("nome", "") or "").strip(),
+        "telefone": str(dados.get("telefone", "") or "").strip(),
+        "cidade": str(dados.get("cidade", "") or "").strip(),
+    }
+    if not validar_telefone_cliente(novo["telefone"]):
+        raise ValueError("Telefone obrigatório: DDD + número, somente dígitos.")
+    # Registros históricos e cadastro privado precisam ser considerados.
+    # Depois que o orçamento é salvo, o próprio histórico já contém este
+    # cliente. Não bloquear o primeiro cadastro por causa desse novo documento.
+    duplicado = conflito_telefone_cliente(
+        novo["telefone"], novo["nome"], cliente_existente=True
+    )
+    if duplicado:
+        raise ValueError(
+            "Telefone já cadastrado para "
+            f"{duplicado.get('nome') or 'outro cliente'}."
+        )
+    clientes.append(novo)
+    texto = json.dumps(clientes, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(DATA_REPO, CLIENTES_FILE)
+    github_put_file(
+        DATA_REPO, CLIENTES_FILE, texto,
+        "Cadastra cliente privado sem duplicidade", sha=sha,
+    )
+    return True
+
+
+def selecionar_cliente_cadastrado():
+    """Callback do seletor: preenche os campos antes de criar os widgets."""
+    chave = st.session_state.get("cliente_existente_id", "")
+    cliente = st.session_state.get("_clientes_preenchimento", {}).get(chave)
+    if cliente:
+        for destino, origem in (
+            ("cliente_nome", "nome"),
+            ("cliente_telefone", "telefone"),
+            ("cliente_cidade", "cidade"),
+        ):
+            st.session_state[destino] = cliente.get(origem, "")
+
+
+def alternar_modo_cliente():
+    """No novo cadastro evita carregar acidentalmente dados do cliente anterior."""
+    if st.session_state.get("cliente_modo_cadastro") == "Novo cliente":
+        if st.session_state.pop("_cliente_ultimo_modo", "") == "Cliente existente":
+            for campo in ("cliente_nome", "cliente_telefone", "cliente_cidade"):
+                st.session_state[campo] = ""
+    else:
+        st.session_state["_cliente_ultimo_modo"] = "Cliente existente"
+        selecionar_cliente_cadastrado()
 
 
 FORMAS_PAGAMENTO = [
@@ -1747,63 +1977,6 @@ def link_whatsapp(texto):
     return f"https://wa.me/{numero}?text={quote(texto)}"
 
 
-def numero_whatsapp_cliente(telefone):
-    """Normaliza telefone brasileiro para wa.me sem expor dados no catálogo."""
-    digitos = "".join(c for c in str(telefone or "") if c.isdigit())
-    if len(digitos) in (10, 11):
-        digitos = "55" + digitos
-    if len(digitos) not in (12, 13) or not digitos.startswith("55"):
-        return ""
-    return digitos
-
-
-def link_whatsapp_cliente(orcamento):
-    """Abre conversa do WhatsApp do cliente; não anexa PDF automaticamente."""
-    cliente = orcamento.get("cliente") or {}
-    numero_whats = numero_whatsapp_cliente(cliente.get("telefone"))
-    if not numero_whats:
-        return None
-
-    numero_doc = str(orcamento.get("numero", "")).zfill(4)
-    situacao = orcamento.get("status", "Orçamento")
-    tipo = {
-        "Orçamento": "orçamento",
-        "Pedido de venda": "pedido de venda",
-        "Faturado / Concluído": "comprovante da venda concluída",
-    }.get(situacao, "orçamento")
-    nome = str(cliente.get("nome", "") or "").strip()
-    saudacao = f"Olá, {nome}!" if nome else "Olá!"
-    mensagem = (
-        f"{saudacao} Aqui é da F Climatização. "
-        f"Entramos em contato sobre seu {tipo} nº {numero_doc}. "
-        "Podemos encaminhar o documento em PDF por aqui."
-    )
-    return f"https://wa.me/{numero_whats}?text={quote(mensagem)}"
-
-
-def botao_enviar_ao_cliente(orcamento, contexto="registro"):
-    """Botão de WhatsApp com identificação única em cada contexto de tela."""
-    numero = str(orcamento.get("numero", "sem_numero"))
-    chave = f"enviar_cliente_{contexto}_{numero}"
-    url = link_whatsapp_cliente(orcamento)
-    if url:
-        st.link_button(
-            "Enviar ao cliente",
-            url,
-            use_container_width=True,
-            help="Abre o WhatsApp do cliente com uma mensagem pronta. O PDF é compartilhado separadamente.",
-        )
-    else:
-        st.button(
-            "Enviar ao cliente",
-            disabled=True,
-            key=chave,
-            use_container_width=True,
-            help="Cadastre telefone/WhatsApp válido com DDD para habilitar.",
-        )
-        st.caption("Cadastre um WhatsApp válido com DDD para enviar ao cliente.")
-
-
 def cabecalho(admin=False):
     logo = logo_data_uri()
     img = f'<img class="brand-logo" src="{logo}" alt="Logo F Climatização">' if logo else ""
@@ -1964,7 +2137,7 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
     </style>
 
     <div class="wrap">
-      <button id="shareBtn" type="button">COMPARTILHAR PDF</button>
+      <button id="shareBtn" type="button">Compartilhar</button>
       <div id="fallback" class="fallback">
         O compartilhamento direto não está disponível neste navegador.
         <a id="downloadLink" download="{nome_arquivo}">Baixar PDF</a>
@@ -2025,91 +2198,30 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
 
 
 def compartilhar_pdf_com_cliente(pdf_bytes, nome_arquivo, orcamento):
-    """Dois botões de tamanho igual: compartilham o mesmo PDF.
+    """Compartilhamento único do PDF pelo menu nativo do celular.
 
-    O navegador não pode escolher o contato de destino no WhatsApp nem anexar
-    arquivo diretamente a uma conversa via wa.me. O segundo botão orienta a
-    seleção do cliente e oferece copiar seu número para ajudar na busca.
+    O destinatário é escolhido manualmente pelo administrador no aplicativo
+    de compartilhamento. Não envia mensagens nem abre conversas automaticamente.
+    Mantém esta assinatura para compatibilidade com as telas existentes.
     """
-    cliente = orcamento.get("cliente") or {}
-    numero = numero_whatsapp_cliente(cliente.get("telefone"))
-    nome = str(cliente.get("nome") or "Cliente").strip()
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    esquerdo, direito = st.columns(2, gap="small")
+    with esquerdo:
+        compartilhar_pdf(pdf_bytes, nome_arquivo)
+    with direito:
+        destino = url_whatsapp_cliente(orcamento.get("cliente", {}))
+        if destino:
+            st.markdown(
+                '<a href="' + destino + '" target="_blank" rel="noopener noreferrer" '
+                'style="display:flex;align-items:center;justify-content:center;'
+                'height:48px;margin:0;border-radius:14px;border:1px solid #1891ff;'
+                'background:#0758b9;color:white;text-decoration:none;'
+                'font-size:13px;font-weight:750;text-align:center">Chamar cliente</a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.button("Chamar cliente", disabled=True, use_container_width=True,
+                      key=f"wa_sem_numero_{orcamento.get('numero','sem_numero')}")
 
-    html = f"""
-    <style>
-      html, body {{ margin:0; padding:0; background:transparent;
-        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
-      .actions {{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-        gap:8px;width:100%;}}
-      button {{ width:100%;height:54px; min-width:0; border-radius:13px;
-        border:1px solid #1891ff;
-        background:linear-gradient(90deg,#0758b9,#0878e8);
-        font-family:inherit; font-size:13px; line-height:1.18;
-        font-weight:750; color:#fff; cursor:pointer; padding:5px 6px;
-        white-space:normal; word-break:normal; }}
-      button:disabled {{ opacity:.48;cursor:not-allowed; }}
-      button:focus-visible {{ outline:2px solid #fff; outline-offset:2px; }}
-      #status {{ min-height:0; margin:5px 0 0; color:#a7bed9;
-        font-size:11px; line-height:1.25; }}
-      #download {{ color:#71bcff; }}
-    </style>
-    <div class="actions">
-      <button id="share" type="button">Compartilhar</button>
-      <button id="client" type="button" {"" if numero else "disabled"}>
-        Compartilhar para o cliente
-      </button>
-    </div>
-    <div id="status" role="status" aria-live="polite"></div>
-    <a id="download" download={json.dumps(nome_arquivo)} style="display:none">Baixar PDF</a>
-    <script>
-      const binary = atob({json.dumps(pdf_b64)});
-      const arr = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-      const fileName = {json.dumps(nome_arquivo)};
-      const blob = new Blob([arr], {{type:'application/pdf'}});
-      const file = new File([blob], fileName, {{type:'application/pdf'}});
-      const url = URL.createObjectURL(blob);
-      const dl = document.getElementById('download');
-      const status = document.getElementById('status');
-      const customerName = {json.dumps(nome, ensure_ascii=False)};
-      const customerPhone = {json.dumps(numero)};
-      dl.href = url;
-      if (!customerPhone) {{
-         status.textContent = 'Cadastre um WhatsApp válido no cliente para habilitar o segundo botão.';
-      }}
-      function fallback() {{
-        status.textContent = 'O navegador não permitiu compartilhar o PDF. Use o download e envie pelo WhatsApp.';
-        dl.style.display='inline';
-        dl.click();
-      }}
-      async function share(toCustomer) {{
-        if (toCustomer) {{
-          status.textContent = 'Selecione WhatsApp e depois o contato ' + customerName
-            + '. O navegador não permite escolher o destinatário automaticamente.';
-          // Copiar o telefone facilita buscar o contato; não é necessário
-          // aguardar a cópia para abrir o compartilhamento.
-          if (navigator.clipboard && customerPhone) {{
-            navigator.clipboard.writeText('+' + customerPhone).catch(() => {{}});
-          }}
-        }} else {{
-          status.textContent = '';
-        }}
-        try {{
-          if (navigator.share && navigator.canShare && navigator.canShare({{files:[file]}})) {{
-            await navigator.share({{files:[file]}});
-          }} else {{ fallback(); }}
-        }} catch (err) {{
-          if (err && err.name === 'AbortError') return;
-          fallback();
-        }}
-      }}
-      document.getElementById('share').addEventListener('click', () => share(false));
-      document.getElementById('client').addEventListener('click', () => share(true));
-      window.addEventListener('pagehide', () => URL.revokeObjectURL(url));
-    </script>
-    """
-    components.html(html, height=100)
 
 
 def mostrar_referencia_capacidade(capacidade):
@@ -3875,7 +3987,9 @@ def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False, context
     situacao = "REALIZADO" if realizado else "PENDENTE · DATA PASSADA" if atrasado else "AGENDADO"
     duracao=int(ag.get('duracao_minutos',60) or 60)
     termino=dt+timedelta(minutes=duracao)
-    st.markdown(
+    coluna_agenda, coluna_wa = st.columns([11, 1.5], gap="small", vertical_alignment="center")
+    with coluna_agenda:
+        st.markdown(
         f"<div style='margin:6px 0 5px;padding:12px 14px;border:1px solid #25466e;"
         f"border-left:4px solid {cor};border-radius:13px;background:#101a2a'>"
         f"<div style='font-weight:850;color:#fff;font-size:15px'>{dt.strftime('%d/%m/%Y')} · {dt.strftime('%H:%M')} — {nome}</div>"
@@ -3883,7 +3997,24 @@ def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False, context
         f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero_html}</div>"
         f"<div style='font-size:11px;font-weight:800;color:{cor};margin-top:6px'>{situacao}</div>"
         f"</div>", unsafe_allow_html=True,
-    )
+        )
+    with coluna_wa:
+        destino = url_whatsapp_cliente(registro.get("cliente", {}))
+        if destino:
+            st.markdown(
+                f'<a href="{destino}" target="_blank" rel="noopener noreferrer" '
+                'title="Chamar cliente" aria-label="Chamar cliente no WhatsApp" '
+                'style="display:flex;align-items:center;justify-content:center;'
+                'height:38px;border:1px solid #2d8e70;background:#112b29;'
+                'border-radius:11px;color:#35d69a;text-decoration:none">'
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" '
+                'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+                'stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
+                '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
+                '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
+                '</svg></a>',
+                unsafe_allow_html=True,
+            )
     if registro.get("status") == "Pedido de venda":
         if realizado:
             if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
@@ -4280,7 +4411,7 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                             key=f"adm_cliente_nome_{numero}",
                         )
                         telefone_editado = st.text_input(
-                            "Telefone / WhatsApp",
+                            "Telefone (DDD + número)",
                             value=str(cliente_atual.get("telefone", "") or ""),
                             key=f"adm_cliente_telefone_{numero}",
                         )
@@ -4295,8 +4426,13 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                             use_container_width=True,
                         )
                     if salvar_cliente:
-                        if not nome_editado.strip() or not telefone_editado.strip():
-                            st.error("Informe o nome e o telefone do cliente.")
+                        if not nome_editado.strip():
+                            st.error("Informe o nome do cliente.")
+                        elif not aviso_telefone_cliente(
+                            telefone_editado, nome_editado,
+                            existente=True, ignorar_numero=numero,
+                        ):
+                            pass
                         else:
                             try:
                                 # Revalida o status antes de gravar: nunca alterar
@@ -4311,10 +4447,15 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                                     st.error("Registro não encontrado. Atualize a listagem.")
                                 elif registro.get("status", "Orçamento") == "Faturado / Concluído":
                                     st.warning("Venda concluída: dados do cliente bloqueados.")
+                                elif not aviso_telefone_cliente(
+                                    telefone_editado, nome_editado,
+                                    existente=True, ignorar_numero=numero,
+                                ):
+                                    pass
                                 else:
                                     registro.setdefault("cliente", {}).update({
                                         "nome": nome_editado.strip(),
-                                        "telefone": telefone_editado.strip(),
+                                        "telefone": _telefone_chave_cliente(telefone_editado),
                                         "cidade": cidade_editada.strip(),
                                     })
                                     registro["atualizado_em"] = datetime.now(
@@ -6875,7 +7016,7 @@ def editor_orcamento_cliente():
             key=f"edit_nome_{numero}",
         )
         edit_telefone = st.text_input(
-            "Telefone / WhatsApp",
+            "Telefone (DDD + número)",
             value=cliente.get("telefone", ""),
             key=f"edit_telefone_{numero}",
         )
@@ -7507,8 +7648,9 @@ def editor_orcamento_cliente():
             st.warning("Informe o nome do cliente.")
             return
 
-        if not edit_telefone.strip():
-            st.warning("Informe o telefone/WhatsApp.")
+        if not aviso_telefone_cliente(
+            edit_telefone, edit_nome, existente=True, ignorar_numero=numero,
+        ):
             return
 
         novos_itens = []
@@ -7753,7 +7895,7 @@ def editor_orcamento_cliente():
 
         orcamento["cliente"] = {
             "nome": edit_nome.strip(),
-            "telefone": edit_telefone.strip(),
+            "telefone": _telefone_chave_cliente(edit_telefone),
             "cidade": edit_cidade.strip(),
         }
         orcamento["possui_aparelho"] = edit_possui
@@ -8393,20 +8535,58 @@ def pagina_cliente(interno=False):
         "cliente_deslocamento",
     )
 
-    secao("Dados do cliente", "Identifique o cliente para registrar o orçamento.")
+    secao("Dados do cliente", "Use um cliente já atendido ou cadastre um novo.")
+    clientes_conhecidos = listar_clientes_para_orcamento()
+    st.session_state["_clientes_preenchimento"] = clientes_conhecidos
+    modos_cliente = ["Novo cliente", "Cliente existente"]
+    if st.session_state.get("cliente_modo_cadastro") not in modos_cliente:
+        st.session_state["cliente_modo_cadastro"] = "Novo cliente"
+    st.radio(
+        "Cadastro do cliente",
+        modos_cliente,
+        horizontal=True,
+        key="cliente_modo_cadastro",
+        on_change=alternar_modo_cliente,
+    )
+    if st.session_state["cliente_modo_cadastro"] == "Cliente existente":
+        if clientes_conhecidos:
+            chaves_clientes = list(clientes_conhecidos)
+            if st.session_state.get("cliente_existente_id") not in chaves_clientes:
+                st.session_state["cliente_existente_id"] = chaves_clientes[0]
+                selecionar_cliente_cadastrado()
+            st.selectbox(
+                "Selecionar cliente cadastrado",
+                options=chaves_clientes,
+                format_func=lambda chave: (
+                    f"{clientes_conhecidos[chave].get('nome', '')} · "
+                    f"{clientes_conhecidos[chave].get('telefone', '')}"
+                ),
+                key="cliente_existente_id",
+                on_change=selecionar_cliente_cadastrado,
+            )
+            st.caption("Clientes de orçamentos, pedidos e vendas concluídas também aparecem aqui.")
+        else:
+            st.info("Ainda não há clientes cadastrados. Selecione Novo cliente.")
 
-    nome_cliente = st.text_input(
-        "Nome",
-        key="cliente_nome",
-    )
+    nome_cliente = st.text_input("Nome", key="cliente_nome")
     telefone = st.text_input(
-        "Telefone / WhatsApp",
-        key="cliente_telefone",
+        "Telefone (DDD + número)", key="cliente_telefone",
+        placeholder="54996523476", max_chars=11,
     )
-    cidade = st.text_input(
-        "Cidade",
-        key="cliente_cidade",
-    )
+    cidade = st.text_input("Cidade", key="cliente_cidade")
+
+    cliente_duplicado_chave = None
+    if st.session_state["cliente_modo_cadastro"] == "Novo cliente":
+        tel_digitado = _telefone_chave_cliente(telefone)
+        for chave, cadastrado in clientes_conhecidos.items():
+            if tel_digitado and _telefone_chave_cliente(cadastrado.get("telefone")) == tel_digitado:
+                cliente_duplicado_chave = chave
+                st.warning(
+                    f"O telefone {telefone} já pertence a "
+                    f"{cadastrado.get('nome') or 'outro cliente'}. "
+                    "Selecione Cliente existente."
+                )
+                break
 
     # Prévia dos descontos antes de gerar o orçamento, incluindo todos os
     # itens selecionados e o adicional automático de andar quando aplicável.
@@ -8481,8 +8661,10 @@ def pagina_cliente(interno=False):
             st.warning("Informe o nome do cliente.")
             return
 
-        if not telefone.strip():
-            st.warning("Informe um telefone/WhatsApp.")
+        if not aviso_telefone_cliente(
+            telefone, nome_cliente,
+            existente=(st.session_state.get("cliente_modo_cadastro") == "Cliente existente"),
+        ):
             return
 
         if situacao_tem_compra(possui):
@@ -8741,7 +8923,7 @@ def pagina_cliente(interno=False):
             "data": datetime.now(FUSO_BRASILIA).strftime("%d/%m/%Y %H:%M"),
             "cliente": {
                 "nome": nome_cliente.strip(),
-                "telefone": telefone.strip(),
+                "telefone": _telefone_chave_cliente(telefone),
                 "cidade": cidade.strip(),
             },
             "possui_aparelho": possui,
@@ -8773,6 +8955,19 @@ def pagina_cliente(interno=False):
             orcamentos.append(novo)
             salvar_orcamentos(orcamentos)
             st.session_state["ultimo_orcamento"] = novo
+
+            # Grava o novo cliente em arquivo privado. Clientes antigos já
+            # aparecem automaticamente por meio do histórico existente.
+            try:
+                if (st.session_state.get("cliente_modo_cadastro") == "Novo cliente"
+                        and not cliente_duplicado_chave):
+                    cadastrar_cliente_privado(novo["cliente"])
+            except Exception as erro_cliente:
+                st.warning(
+                    "Orçamento salvo, mas não foi possível atualizar o cadastro "
+                    f"privado de clientes: {erro_cliente}. "
+                    "O cliente continua disponível pelo histórico deste orçamento."
+                )
 
             # Orçamento concluído: apaga o rascunho temporário.
             limpar_rascunho_cliente()
