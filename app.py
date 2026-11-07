@@ -1781,8 +1781,10 @@ def link_whatsapp_cliente(orcamento):
     return f"https://wa.me/{numero_whats}?text={quote(mensagem)}"
 
 
-def botao_enviar_ao_cliente(orcamento):
-    """Botão para abrir conversa diretamente com o número cadastrado."""
+def botao_enviar_ao_cliente(orcamento, contexto="registro"):
+    """Botão de WhatsApp com identificação única em cada contexto de tela."""
+    numero = str(orcamento.get("numero", "sem_numero"))
+    chave = f"enviar_cliente_{contexto}_{numero}"
     url = link_whatsapp_cliente(orcamento)
     if url:
         st.link_button(
@@ -1795,6 +1797,7 @@ def botao_enviar_ao_cliente(orcamento):
         st.button(
             "Enviar ao cliente",
             disabled=True,
+            key=chave,
             use_container_width=True,
             help="Cadastre telefone/WhatsApp válido com DDD para habilitar.",
         )
@@ -5098,7 +5101,7 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                     titulo=f"Orçamento {numero} - F Climatização",
                 )
             with col_cliente:
-                botao_enviar_ao_cliente(o)
+                botao_enviar_ao_cliente(o, contexto="gestao_comercial")
 
 
 # =========================================================
@@ -7733,7 +7736,7 @@ def editor_orcamento_cliente():
             titulo=f'Orçamento {numero} - F Climatização',
         )
     with col_cliente:
-        botao_enviar_ao_cliente(orcamento)
+        botao_enviar_ao_cliente(orcamento, contexto="edicao_orcamento")
 
     if st.button(
         "Fechar edição",
@@ -8837,7 +8840,7 @@ def pagina_cliente(interno=False):
                 titulo=f"Orçamento {numero} - F Climatização",
             )
         with col_cliente:
-            botao_enviar_ao_cliente(ultimo)
+            botao_enviar_ao_cliente(ultimo, contexto="novo_orcamento")
 
         st.caption(
             "Enviar ao cliente abre a conversa com o WhatsApp cadastrado. "
