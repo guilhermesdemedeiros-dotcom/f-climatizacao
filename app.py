@@ -4365,6 +4365,71 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                         )
 
             # ---------------------------------------------
+            # DESLOCAMENTO EM ORÇAMENTOS E PEDIDOS ABERTOS
+            # ---------------------------------------------
+            deslocamento_editado = None
+            km_valido_para_salvar = True
+            if status_atual in ("Orçamento", "Pedido de venda"):
+                # A cobrança fica disponível sem precisar refazer o orçamento.
+                # Retirar a linha antiga antes de remontá-la impede cobranças duplicadas.
+                item_km_anterior = next(
+                    (
+                        item for item in o.get("itens", [])
+                        if item.get("origem") == "deslocamento"
+                    ),
+                    None,
+                )
+                meta_km = o.get("deslocamento") or {}
+                cobrar_inicial = bool(item_km_anterior) or bool(
+                    meta_km.get("cobrar_km", False)
+                )
+                distancia_inicial = (
+                    float(item_km_anterior.get("quantidade", 0) or 0)
+                    if item_km_anterior
+                    else float(meta_km.get("km_rodados", 0) or 0)
+                )
+                itens_editados = [
+                    item for item in itens_editados
+                    if item.get("origem") != "deslocamento"
+                ]
+
+                with st.expander(
+                    "Deslocamento / Cobrar km",
+                    expanded=cobrar_inicial,
+                ):
+                    cobrar_km_edit, km_edit, tarifa_km_edit = controles_cobranca_km(
+                        f"adm_deslocamento_{numero}",
+                        ativo=cobrar_inicial,
+                        distancia=distancia_inicial,
+                    )
+                    if cobrar_km_edit:
+                        if km_edit <= 0 or tarifa_km_edit <= 0:
+                            km_valido_para_salvar = False
+                            st.warning(
+                                "Para salvar o deslocamento, informe a distância e "
+                                "configure a tarifa por km em ADM → Regras."
+                            )
+                        else:
+                            item_km = item_cobranca_km(km_edit, tarifa_km_edit)
+                            if item_km is not None:
+                                # Manter o identificador e eventual desconto do item antigo.
+                                if item_km_anterior:
+                                    item_km["id"] = item_km_anterior.get(
+                                        "id", item_km.get("id")
+                                    )
+                                    item_km["desconto_percentual"] = float(
+                                        item_km_anterior.get("desconto_percentual", 0) or 0
+                                    )
+                                itens_editados.append(item_km)
+                    deslocamento_editado = {
+                        "cobrar_km": bool(cobrar_km_edit),
+                        "km_rodados": float(km_edit if cobrar_km_edit else 0),
+                        "valor_por_km": float(
+                            tarifa_km_edit if cobrar_km_edit else 0
+                        ),
+                    }
+
+            # ---------------------------------------------
             # OPÇÕES COMPARATIVAS
             # ---------------------------------------------
             opcoes_editadas = []
@@ -4840,6 +4905,7 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                     opcoes_editadas if opcoes else []
                 ),
                 "desconto_percentual": float(desconto_geral),
+                "deslocamento": deslocamento_editado,
             }
 
             sig_auto = assinatura_dados(estado_auto)
@@ -4849,7 +4915,7 @@ def aba_orcamentos(status_fixo="Orçamentos"):
             if sig_anterior is None:
                 st.session_state[chave_sig_auto] = sig_auto
 
-            elif sig_anterior != sig_auto:
+            elif sig_anterior != sig_auto and km_valido_para_salvar:
                 try:
                     if adicionar_novo and novo_catalogo:
                         nome_catalogo = novo_catalogo["nome"]
@@ -4871,6 +4937,8 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                         opcoes_editadas if opcoes else []
                     )
                     o["desconto_percentual"] = float(desconto_geral)
+                    if deslocamento_editado is not None:
+                        o["deslocamento"] = copy.deepcopy(deslocamento_editado)
                     o["atualizado_em"] = datetime.now(
                         FUSO_BRASILIA
                     ).strftime("%d/%m/%Y %H:%M")
@@ -4889,6 +4957,8 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                     st.caption("✓ Alterações deste registro salvas automaticamente.")
                 except Exception as e:
                     st.error(f"Erro no salvamento automático: {e}")
+            elif not km_valido_para_salvar:
+                st.warning("Deslocamento não salvo: confira a quilometragem e a tarifa.")
             else:
                 st.caption("✓ Salvamento automático deste registro ativo.")
 
