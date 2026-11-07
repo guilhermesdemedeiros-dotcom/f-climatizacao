@@ -3975,60 +3975,69 @@ def confirmar_faturamento_agenda(numero):
 
 
 def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False, contexto="agenda"):
+    """Cartão compacto com contato à direita e ações pequenas abaixo."""
     from html import escape
-    nome = escape(str(registro.get("cliente", {}).get("nome", "Cliente")))
+
+    cliente = registro.get("cliente") or {}
+    nome = escape(str(cliente.get("nome") or "Cliente"))
     ag = registro.get("agendamento") or {}
-    cidade = registro.get("cliente", {}).get("cidade", "")
-    local = escape(str(ag.get("local", "") or cidade or "Local não informado"))
-    servico = escape(descricao_agendamento(registro))
+    local = escape(str(ag.get("local") or cliente.get("cidade") or "Local não informado"))
+    servico = escape(str(descricao_agendamento(registro)))
     numero = str(registro.get("numero", "")).zfill(4)
     numero_html = escape(numero)
     cor = "#35c584" if realizado else "#ff7770" if atrasado else "#ff821d"
     situacao = "REALIZADO" if realizado else "PENDENTE · DATA PASSADA" if atrasado else "AGENDADO"
-    duracao=int(ag.get('duracao_minutos',60) or 60)
-    termino=dt+timedelta(minutes=duracao)
-    coluna_agenda, coluna_wa = st.columns([11, 1.5], gap="small", vertical_alignment="center")
-    with coluna_agenda:
-        st.markdown(
-        f"<div style='margin:6px 0 5px;padding:12px 14px;border:1px solid #25466e;"
-        f"border-left:4px solid {cor};border-radius:13px;background:#101a2a'>"
-        f"<div style='font-weight:850;color:#fff;font-size:15px'>{dt.strftime('%d/%m/%Y')} · {dt.strftime('%H:%M')} — {nome}</div>"
-        f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico} · até {termino.strftime('%H:%M')}</div>"
-        f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero_html}</div>"
-        f"<div style='font-size:11px;font-weight:800;color:{cor};margin-top:6px'>{situacao}</div>"
-        f"</div>", unsafe_allow_html=True,
-        )
-    with coluna_wa:
-        destino = url_whatsapp_cliente(registro.get("cliente", {}))
-        if destino:
-            st.markdown(
-                f'<a href="{destino}" target="_blank" rel="noopener noreferrer" '
-                'title="Chamar cliente" aria-label="Chamar cliente no WhatsApp" '
-                'style="display:flex;align-items:center;justify-content:center;'
-                'height:38px;border:1px solid #2d8e70;background:#112b29;'
-                'border-radius:11px;color:#35d69a;text-decoration:none">'
-                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" '
-                'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
-                'stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
-                '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
-                '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
-                '</svg></a>',
-                unsafe_allow_html=True,
-            )
+    duracao = int(ag.get("duracao_minutos", 60) or 60)
+    termino = dt + timedelta(minutes=duracao)
+
+    destino = url_whatsapp_cliente(cliente)
+    contato_html = (
+        f'<a class="fc-agenda-wa" href="{escape(destino, quote=True)}" '
+        'target="_blank" rel="noopener noreferrer" title="Chamar cliente" '
+        'aria-label="Chamar cliente no WhatsApp">'
+        '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" '
+        'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
+        '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
+        '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
+        '</svg></a>'
+    ) if destino else ""
+
+    st.markdown(
+        f'<div class="fc-agenda-card" style="border-left-color:{cor}">'
+        '<div class="fc-agenda-card-content">'
+        f'<div class="fc-agenda-name">{dt.strftime("%d/%m/%Y")} · {dt.strftime("%H:%M")} — {nome}</div>'
+        f'<div class="fc-agenda-desc">{servico} · até {termino.strftime("%H:%M")}</div>'
+        f'<div class="fc-agenda-location">{local} · Pedido #{numero_html}</div>'
+        f'<div class="fc-agenda-status" style="color:{cor}">{situacao}</div>'
+        '</div>' + contato_html + '</div>',
+        unsafe_allow_html=True,
+    )
+
     if registro.get("status") == "Pedido de venda":
-        if realizado:
-            if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
-                confirmar_faturamento_agenda(numero)
-        else:
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("✓ Serviço realizado", key=f"{contexto}_realizar_{numero}", use_container_width=True):
-                    confirmar_servico_realizado(numero)
-            with c2:
-                if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
-                    confirmar_faturamento_agenda(numero)
-            if st.button("⚠ Não será possível realizar · reagendar", key=f"{contexto}_reagendar_{numero}", use_container_width=True):
-                reagendar_por_impedimento(numero)
+        with st.container(key=f"fc_agenda_actions_{contexto}_{numero}"):
+            if realizado:
+                a, _ = st.columns([1, 1], gap="small")
+                with a:
+                    if st.button("Concluir venda", icon=":material/check_circle:",
+                                 key=f"{contexto}_faturar_{numero}", use_container_width=True):
+                        confirmar_faturamento_agenda(numero)
+            else:
+                a, b, c = st.columns(3, gap="small")
+                with a:
+                    if st.button("Realizado", icon=":material/done:",
+                                 key=f"{contexto}_realizar_{numero}", use_container_width=True):
+                        confirmar_servico_realizado(numero)
+                with b:
+                    if st.button("Concluir", icon=":material/check_circle:",
+                                 key=f"{contexto}_faturar_{numero}", use_container_width=True,
+                                 help="Concluir venda"):
+                        confirmar_faturamento_agenda(numero)
+                with c:
+                    if st.button("Reagendar", icon=":material/event_repeat:",
+                                 key=f"{contexto}_reagendar_{numero}", use_container_width=True):
+                        reagendar_por_impedimento(numero)
     elif realizado:
         st.caption("Venda concluída · registro mantido no histórico")
 
@@ -6619,13 +6628,26 @@ def painel_semana_admin(registros):
             servico = escape(str(descricao_agendamento(registro)))
             ag = registro.get("agendamento") or {}
             local = escape(str(ag.get("endereco") or (registro.get("cliente") or {}).get("cidade") or "Local a confirmar"))
+            destino_wa = url_whatsapp_cliente(registro.get("cliente") or {})
+            icone_contato = (
+                f'<a class="fc-home-wa" href="{escape(destino_wa, quote=True)}" '
+                'target="_blank" rel="noopener noreferrer" '
+                'title="Chamar cliente" aria-label="Chamar cliente no WhatsApp">'
+                '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" '
+                'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
+                'stroke-linejoin="round" aria-hidden="true">'
+                '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
+                '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
+                '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
+                '</svg></a>'
+            ) if destino_wa else ""
             itens_html.append(
                 '<div class="fc-home-event">'
                 f'<div class="fc-home-event-time">{momento.strftime("%H:%M")}</div>'
                 '<div class="fc-home-event-info">'
                 f'<strong>{nome}</strong><span>{servico}</span>'
                 f'<small>{local} · Pedido #{numero}</small>'
-                '</div></div>'
+                '</div>' + icone_contato + '</div>'
             )
         conteudo = "".join(itens_html) if itens_html else '<div class="fc-home-empty">Nenhum serviço agendado</div>'
         quantidade = f"{len(compromissos)} serviço(s)" if compromissos else "Livre"
@@ -6665,6 +6687,20 @@ def estilo_dashboard_admin():
 .fc-home-event-info strong {color:#f4f8ff;font-size:12px;}
 .fc-home-event-info span {color:#b6c8df;font-size:11px;}
 .fc-home-event-info small {color:#94a6bc;font-size:10px;}
+.fc-home-event-info {flex:1 1 auto;}
+.fc-home-wa, .fc-agenda-wa {display:inline-flex;flex:0 0 33px;align-items:center;justify-content:center;width:33px;height:33px;border-radius:10px;border:1px solid #285a4d;background:#152820;color:#43d69c;text-decoration:none;align-self:center;}
+.fc-home-wa:hover,.fc-agenda-wa:hover {background:#1e4034;border-color:#3eaf80;color:#72edb9;}
+.fc-agenda-card {display:flex;gap:9px;align-items:flex-start;margin:6px 0 5px;padding:11px 12px;border:1px solid #25466e;border-left:4px solid;border-radius:13px;background:#101a2a;}
+.fc-agenda-card-content {flex:1 1 auto;min-width:0;overflow-wrap:anywhere;}
+.fc-agenda-name {font-weight:850;color:#fff;font-size:14px;}
+.fc-agenda-desc {color:#75baff;font-weight:700;font-size:12px;margin-top:4px;}
+.fc-agenda-location {color:#c6d5e8;font-size:11px;margin-top:5px;}
+.fc-agenda-status {font-size:10px;font-weight:800;margin-top:5px;}
+/* Somente os controles da agenda; duas ou três ações realmente lado a lado no celular. */
+div[class*="st-key-fc_agenda_actions_"] div[data-testid="stHorizontalBlock"] {display:flex !important;flex-flow:row nowrap !important;gap:6px !important;align-items:stretch !important;}
+div[class*="st-key-fc_agenda_actions_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {min-width:0 !important;width:0 !important;flex:1 1 0 !important;}
+div[class*="st-key-fc_agenda_actions_"] button {width:100% !important;min-height:35px !important;padding:5px 3px !important;font-size:11px !important;border-radius:9px !important;line-height:1.2 !important;white-space:normal !important;}
+div[class*="st-key-fc_agenda_actions_"] button span[data-testid="stIconMaterial"] {font-size:15px !important;}
 .fc-home-grid-title {font-size:17px;font-weight:850;color:#f1f8ff;margin:20px 0 10px;}
 div[class*="st-key-fc_atalho_"] button {min-height:64px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:7px 5px !important;font-size:11px !important;font-weight:750 !important;white-space:normal !important;line-height:1.35 !important;}
 div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
