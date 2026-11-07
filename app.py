@@ -2024,6 +2024,94 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
 
 
 
+def compartilhar_pdf_com_cliente(pdf_bytes, nome_arquivo, orcamento):
+    """Dois botões de tamanho igual: compartilham o mesmo PDF.
+
+    O navegador não pode escolher o contato de destino no WhatsApp nem anexar
+    arquivo diretamente a uma conversa via wa.me. O segundo botão orienta a
+    seleção do cliente e oferece copiar seu número para ajudar na busca.
+    """
+    cliente = orcamento.get("cliente") or {}
+    numero = numero_whatsapp_cliente(cliente.get("telefone"))
+    nome = str(cliente.get("nome") or "Cliente").strip()
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+    html = f"""
+    <style>
+      html, body {{ margin:0; padding:0; background:transparent;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+      .actions {{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+        gap:8px;width:100%;}}
+      button {{ width:100%;height:54px; min-width:0; border-radius:13px;
+        border:1px solid #1891ff;
+        background:linear-gradient(90deg,#0758b9,#0878e8);
+        font-family:inherit; font-size:13px; line-height:1.18;
+        font-weight:750; color:#fff; cursor:pointer; padding:5px 6px;
+        white-space:normal; word-break:normal; }}
+      button:disabled {{ opacity:.48;cursor:not-allowed; }}
+      button:focus-visible {{ outline:2px solid #fff; outline-offset:2px; }}
+      #status {{ min-height:0; margin:5px 0 0; color:#a7bed9;
+        font-size:11px; line-height:1.25; }}
+      #download {{ color:#71bcff; }}
+    </style>
+    <div class="actions">
+      <button id="share" type="button">Compartilhar</button>
+      <button id="client" type="button" {"" if numero else "disabled"}>
+        Compartilhar para o cliente
+      </button>
+    </div>
+    <div id="status" role="status" aria-live="polite"></div>
+    <a id="download" download={json.dumps(nome_arquivo)} style="display:none">Baixar PDF</a>
+    <script>
+      const binary = atob({json.dumps(pdf_b64)});
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+      const fileName = {json.dumps(nome_arquivo)};
+      const blob = new Blob([arr], {{type:'application/pdf'}});
+      const file = new File([blob], fileName, {{type:'application/pdf'}});
+      const url = URL.createObjectURL(blob);
+      const dl = document.getElementById('download');
+      const status = document.getElementById('status');
+      const customerName = {json.dumps(nome, ensure_ascii=False)};
+      const customerPhone = {json.dumps(numero)};
+      dl.href = url;
+      if (!customerPhone) {{
+         status.textContent = 'Cadastre um WhatsApp válido no cliente para habilitar o segundo botão.';
+      }}
+      function fallback() {{
+        status.textContent = 'O navegador não permitiu compartilhar o PDF. Use o download e envie pelo WhatsApp.';
+        dl.style.display='inline';
+        dl.click();
+      }}
+      async function share(toCustomer) {{
+        if (toCustomer) {{
+          status.textContent = 'Selecione WhatsApp e depois o contato ' + customerName
+            + '. O navegador não permite escolher o destinatário automaticamente.';
+          // Copiar o telefone facilita buscar o contato; não é necessário
+          // aguardar a cópia para abrir o compartilhamento.
+          if (navigator.clipboard && customerPhone) {{
+            navigator.clipboard.writeText('+' + customerPhone).catch(() => {{}});
+          }}
+        }} else {{
+          status.textContent = '';
+        }}
+        try {{
+          if (navigator.share && navigator.canShare && navigator.canShare({{files:[file]}})) {{
+            await navigator.share({{files:[file]}});
+          }} else {{ fallback(); }}
+        }} catch (err) {{
+          if (err && err.name === 'AbortError') return;
+          fallback();
+        }}
+      }}
+      document.getElementById('share').addEventListener('click', () => share(false));
+      document.getElementById('client').addEventListener('click', () => share(true));
+      window.addEventListener('pagehide', () => URL.revokeObjectURL(url));
+    </script>
+    """
+    components.html(html, height=100)
+
+
 def mostrar_referencia_capacidade(capacidade):
     if capacidade not in REFERENCIA_AREA:
         return
@@ -5093,15 +5181,11 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                 )
 
             pdf_bytes = gerar_pdf(preview)
-            col_pdf, col_cliente = st.columns(2, gap="small")
-            with col_pdf:
-                compartilhar_pdf(
-                    pdf_bytes,
-                    f"orcamento_{numero}_F_Climatizacao.pdf",
-                    titulo=f"Orçamento {numero} - F Climatização",
-                )
-            with col_cliente:
-                botao_enviar_ao_cliente(o, contexto="gestao_comercial")
+            compartilhar_pdf_com_cliente(
+                pdf_bytes,
+                f"orcamento_{numero}_F_Climatizacao.pdf",
+                o,
+            )
 
 
 # =========================================================
@@ -7728,15 +7812,11 @@ def editor_orcamento_cliente():
     # -----------------------------------------------------
 
     pdf_atualizado = gerar_pdf(orcamento)
-    col_pdf, col_cliente = st.columns(2, gap="small")
-    with col_pdf:
-        compartilhar_pdf(
-            pdf_atualizado,
-            f'orcamento_{numero}_F_Climatizacao.pdf',
-            titulo=f'Orçamento {numero} - F Climatização',
-        )
-    with col_cliente:
-        botao_enviar_ao_cliente(orcamento, contexto="edicao_orcamento")
+    compartilhar_pdf_com_cliente(
+        pdf_atualizado,
+        f'orcamento_{numero}_F_Climatizacao.pdf',
+        orcamento,
+    )
 
     if st.button(
         "Fechar edição",
@@ -8832,19 +8912,10 @@ def pagina_cliente(interno=False):
         )
 
         pdf = gerar_pdf(ultimo)
-        col_pdf, col_cliente = st.columns(2, gap="small")
-        with col_pdf:
-            compartilhar_pdf(
-                pdf,
-                f"orcamento_{numero}_F_Climatizacao.pdf",
-                titulo=f"Orçamento {numero} - F Climatização",
-            )
-        with col_cliente:
-            botao_enviar_ao_cliente(ultimo, contexto="novo_orcamento")
-
-        st.caption(
-            "Enviar ao cliente abre a conversa com o WhatsApp cadastrado. "
-            "Para anexar o PDF, use Compartilhar PDF e escolha o contato no WhatsApp."
+        compartilhar_pdf_com_cliente(
+            pdf,
+            f"orcamento_{numero}_F_Climatizacao.pdf",
+            ultimo,
         )
 
     st.markdown(
