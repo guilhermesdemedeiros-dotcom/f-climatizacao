@@ -3444,7 +3444,7 @@ def faixas_semana_disponiveis(dia, disponibilidade):
     if dia.isoformat() in overrides:
         return overrides[dia.isoformat()]
     if dia.weekday() == 6:
-        return []
+        return plano.get('domingo', [])
     if dia.weekday() == 5:
         return plano.get('sabado', [])
     return plano.get('janelas', JANELAS_TURNO.get(plano.get('turno'), []))
@@ -3576,7 +3576,7 @@ def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefix
 
 def painel_configuracao_agenda():
     secao('Horários de trabalho', 'Configure esta semana e as próximas. A Agenda fica somente para acompanhar e reagendar serviços.')
-    st.caption('Selecione uma semana para definir o turno de segunda a sexta e os horários opcionais de sábado.')
+    st.caption('Selecione uma semana para definir o turno de segunda a sexta e os horários opcionais de sábado e domingo.')
     try:
         disponibilidade = carregar_disponibilidade_agenda()
     except Exception as e:
@@ -3628,6 +3628,33 @@ def painel_configuracao_agenda():
             key=f'qtd_sab_{chave_semana}',
             help='Use + e − para adicionar ou remover horários.',
         )
+    # Domingo é opcional e configurado independentemente do sábado.
+    domingo_atual = plano_atual.get('domingo', [])
+    modo_domingo_salvo = plano_atual.get('domingo_modo')
+    if not modo_domingo_salvo:
+        if not domingo_atual:
+            modo_domingo_salvo = 'Não trabalhar'
+        elif len(domingo_atual) == 1 and minutos_horario(domingo_atual[0][1]) <= 12 * 60:
+            modo_domingo_salvo = 'Somente manhã'
+        elif len(domingo_atual) == 1 and minutos_horario(domingo_atual[0][0]) >= 12 * 60:
+            modo_domingo_salvo = 'Somente tarde'
+        else:
+            modo_domingo_salvo = 'Personalizar horários'
+    modos_domingo = ['Não trabalhar', 'Somente manhã', 'Somente tarde', 'Personalizar horários']
+    modo_domingo = st.selectbox(
+        'Disponibilidade de domingo', modos_domingo,
+        index=modos_domingo.index(modo_domingo_salvo) if modo_domingo_salvo in modos_domingo else 0,
+        key=f'agenda_modo_domingo_{chave_semana}',
+        help='Defina um turno, ou horários personalizados para o domingo.',
+    )
+    qtd_dom = 0
+    if modo_domingo == 'Personalizar horários':
+        qtd_dom = st.number_input(
+            'Quantidade de faixas no domingo', min_value=1, max_value=6,
+            value=max(1, len(domingo_atual)), step=1,
+            key=f'qtd_dom_{chave_semana}',
+            help='Use + e − para adicionar ou remover horários.',
+        )
     with st.form(f'agenda_semana_form_{chave_semana}'):
         turno = st.radio(
             'Turno do trabalho principal (segunda a sexta)', turnos,
@@ -3665,6 +3692,28 @@ def painel_configuracao_agenda():
                 sabado.append(selecionar_faixa_agenda(
                     f'sab_{chave_semana}_{indice}', inicio=janela[0], fim=janela[1],
                 ))
+        st.markdown('**Domingo**')
+        domingo = []
+        if modo_domingo == 'Não trabalhar':
+            st.caption('Domingo indisponível nesta semana.')
+        elif modo_domingo in ('Somente manhã', 'Somente tarde'):
+            horario_padrao_dom = (['08:00', '11:30'] if modo_domingo == 'Somente manhã'
+                                   else ['13:00', '17:00'])
+            horario_anterior_dom = domingo_atual[0] if (
+                modo_domingo_salvo == modo_domingo and len(domingo_atual) == 1
+            ) else horario_padrao_dom
+            st.caption('Ajuste início e fim caso necessário.')
+            domingo.append(selecionar_faixa_agenda(
+                f'dom_unico_{chave_semana}_{modo_domingo}',
+                inicio=horario_anterior_dom[0], fim=horario_anterior_dom[1],
+            ))
+        else:
+            for indice in range(int(qtd_dom)):
+                st.caption(f'Faixa {indice+1} do domingo')
+                janela = domingo_atual[indice] if indice < len(domingo_atual) else ['08:00', '11:30']
+                domingo.append(selecionar_faixa_agenda(
+                    f'dom_{chave_semana}_{indice}', inicio=janela[0], fim=janela[1],
+                ))
         salvar_semana = st.form_submit_button('Salvar horários desta semana',
             type='primary', use_container_width=True)
     if salvar_semana:
@@ -3672,9 +3721,11 @@ def painel_configuracao_agenda():
             janelas_turno = normalizar_faixas_agenda(
                 [horario_manual] if personalizar else JANELAS_TURNO[turno])
             sabado = normalizar_faixas_agenda(sabado)
+            domingo = normalizar_faixas_agenda(domingo)
             disponibilidade.setdefault('semanas_turnos', {})[chave_semana] = {
                 'turno': turno, 'manual': bool(personalizar),
                 'janelas': janelas_turno, 'sabado': sabado, 'sabado_modo': modo_sabado,
+                'domingo': domingo, 'domingo_modo': modo_domingo,
                 'dias_especiais': copy.deepcopy(plano_atual.get('dias_especiais', {})),
             }
             salvar_disponibilidade_agenda(disponibilidade)
