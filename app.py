@@ -1747,6 +1747,60 @@ def link_whatsapp(texto):
     return f"https://wa.me/{numero}?text={quote(texto)}"
 
 
+def numero_whatsapp_cliente(telefone):
+    """Normaliza telefone brasileiro para wa.me sem expor dados no catálogo."""
+    digitos = "".join(c for c in str(telefone or "") if c.isdigit())
+    if len(digitos) in (10, 11):
+        digitos = "55" + digitos
+    if len(digitos) not in (12, 13) or not digitos.startswith("55"):
+        return ""
+    return digitos
+
+
+def link_whatsapp_cliente(orcamento):
+    """Abre conversa do WhatsApp do cliente; não anexa PDF automaticamente."""
+    cliente = orcamento.get("cliente") or {}
+    numero_whats = numero_whatsapp_cliente(cliente.get("telefone"))
+    if not numero_whats:
+        return None
+
+    numero_doc = str(orcamento.get("numero", "")).zfill(4)
+    situacao = orcamento.get("status", "Orçamento")
+    tipo = {
+        "Orçamento": "orçamento",
+        "Pedido de venda": "pedido de venda",
+        "Faturado / Concluído": "comprovante da venda concluída",
+    }.get(situacao, "orçamento")
+    nome = str(cliente.get("nome", "") or "").strip()
+    saudacao = f"Olá, {nome}!" if nome else "Olá!"
+    mensagem = (
+        f"{saudacao} Aqui é da F Climatização. "
+        f"Entramos em contato sobre seu {tipo} nº {numero_doc}. "
+        "Podemos encaminhar o documento em PDF por aqui."
+    )
+    return f"https://wa.me/{numero_whats}?text={quote(mensagem)}"
+
+
+def botao_enviar_ao_cliente(orcamento):
+    """Botão para abrir conversa diretamente com o número cadastrado."""
+    url = link_whatsapp_cliente(orcamento)
+    if url:
+        st.link_button(
+            "Enviar ao cliente",
+            url,
+            use_container_width=True,
+            help="Abre o WhatsApp do cliente com uma mensagem pronta. O PDF é compartilhado separadamente.",
+        )
+    else:
+        st.button(
+            "Enviar ao cliente",
+            disabled=True,
+            use_container_width=True,
+            help="Cadastre telefone/WhatsApp válido com DDD para habilitar.",
+        )
+        st.caption("Cadastre um WhatsApp válido com DDD para enviar ao cliente.")
+
+
 def cabecalho(admin=False):
     logo = logo_data_uri()
     img = f'<img class="brand-logo" src="{logo}" alt="Logo F Climatização">' if logo else ""
@@ -5035,13 +5089,16 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                     "Alterações de itens, preços e descontos são gravadas automaticamente."
                 )
 
-            with cpdf:
-                pdf_bytes = gerar_pdf(preview)
+            pdf_bytes = gerar_pdf(preview)
+            col_pdf, col_cliente = st.columns(2, gap="small")
+            with col_pdf:
                 compartilhar_pdf(
                     pdf_bytes,
                     f"orcamento_{numero}_F_Climatizacao.pdf",
                     titulo=f"Orçamento {numero} - F Climatização",
                 )
+            with col_cliente:
+                botao_enviar_ao_cliente(o)
 
 
 # =========================================================
@@ -7668,11 +7725,15 @@ def editor_orcamento_cliente():
     # -----------------------------------------------------
 
     pdf_atualizado = gerar_pdf(orcamento)
-    compartilhar_pdf(
-        pdf_atualizado,
-        f'orcamento_{numero}_F_Climatizacao.pdf',
-        titulo=f'Orçamento {numero} - F Climatização',
-    )
+    col_pdf, col_cliente = st.columns(2, gap="small")
+    with col_pdf:
+        compartilhar_pdf(
+            pdf_atualizado,
+            f'orcamento_{numero}_F_Climatizacao.pdf',
+            titulo=f'Orçamento {numero} - F Climatização',
+        )
+    with col_cliente:
+        botao_enviar_ao_cliente(orcamento)
 
     if st.button(
         "Fechar edição",
@@ -8768,27 +8829,19 @@ def pagina_cliente(interno=False):
         )
 
         pdf = gerar_pdf(ultimo)
-        compartilhar_pdf(
-            pdf,
-            f"orcamento_{numero}_F_Climatizacao.pdf",
-            titulo=f"Orçamento {numero} - F Climatização",
-        )
-
-        mensagem = (
-            f"Olá! Sou {ultimo['cliente']['nome']}. "
-            f"Gerei o orçamento nº {numero} pelo sistema da F Climatização. "
-            "Vou enviar o PDF do orçamento para conferência."
-        )
-
-        st.link_button(
-            "ENVIAR MENSAGEM PARA A F CLIMATIZAÇÃO",
-            link_whatsapp(mensagem),
-            use_container_width=True,
-        )
+        col_pdf, col_cliente = st.columns(2, gap="small")
+        with col_pdf:
+            compartilhar_pdf(
+                pdf,
+                f"orcamento_{numero}_F_Climatizacao.pdf",
+                titulo=f"Orçamento {numero} - F Climatização",
+            )
+        with col_cliente:
+            botao_enviar_ao_cliente(ultimo)
 
         st.caption(
-            "Para enviar o PDF pelo WhatsApp, toque em Compartilhar PDF "
-            "e escolha o WhatsApp na folha de compartilhamento do celular."
+            "Enviar ao cliente abre a conversa com o WhatsApp cadastrado. "
+            "Para anexar o PDF, use Compartilhar PDF e escolha o contato no WhatsApp."
         )
 
     st.markdown(
