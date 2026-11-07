@@ -5168,9 +5168,14 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                                     key=f"adm_add_serv_desc_{numero}",
                                 )
 
-                            st.caption(
-                                f"Preço cadastrado para {capacidade_serv}: "
-                                f"{dinheiro(preco_servico)}"
+                            preco_servico = st.number_input(
+                                "Valor unitário neste orçamento (R$)",
+                                min_value=0.0,
+                                value=float(preco_servico),
+                                step=1.0,
+                                format="%.2f",
+                                key=f"adm_add_serv_preco_{numero}",
+                                help="Este valor vale somente para este documento.",
                             )
 
                             if servico_qtd > 0:
@@ -7488,6 +7493,28 @@ def editor_orcamento_cliente():
                     help="O valor unitário é multiplicado pela quantidade escolhida.",
                 )
 
+    # Preço unitário do serviço neste registro, sem alterar o cadastro geral.
+    edit_precos_servicos = {}
+    for nome_servico in edit_servicos:
+        valor_base = precos_servicos_atuais.get(nome_servico)
+        if valor_base is None:
+            referencia = (
+                edit_capacidade_existente if edit_possui == "Já tenho um e também quero comprar outro"
+                else edit_capacidade
+            )
+            valor_base = float(
+                config.get("servicos", {}).get(nome_servico, {})
+                .get("precos", {}).get(referencia, 0) or 0
+            )
+        edit_precos_servicos[nome_servico] = float(st.number_input(
+            f"Valor unitário do serviço — {nome_servico} (R$)",
+            min_value=0.0,
+            value=float(valor_base),
+            step=1.0,
+            format="%.2f",
+            key=f"edit_preco_serv_{numero}_{nome_servico}",
+        ))
+
     # -----------------------------------------------------
     # MATERIAIS / QUANTIDADES
     # -----------------------------------------------------
@@ -7830,6 +7857,7 @@ def editor_orcamento_cliente():
                         or 0
                     ) if cap_servico_editor else 0.0
 
+                    valor = edit_precos_servicos[nome_servico]
                     descricao_servico = descricao_servico_orcamento(nome_servico, cap_servico_editor, edit_quantidades_pontos.get(nome_servico, 1))
 
                     novos_itens.append(
@@ -7873,6 +7901,7 @@ def editor_orcamento_cliente():
                                 or 0
                             )
 
+                            valor = edit_precos_servicos[nome_servico]
                             servicos_eq.append(
                                 {
                                     "descricao": descricao_servico_orcamento(nome_servico, cap_eq, edit_quantidades_pontos.get(nome_servico, 1)),
@@ -7917,6 +7946,7 @@ def editor_orcamento_cliente():
                             )
                             or 0
                         ) if cap_existente_editor else 0.0
+                        valor = edit_precos_servicos[nome_servico]
                         descricao = (
                             descricao_servico_orcamento(nome_servico, cap_existente_editor, edit_quantidades_pontos.get(nome_servico, 1))
                         )
@@ -7957,9 +7987,10 @@ def editor_orcamento_cliente():
                         )
                         or 0
                     )
+                    valor = edit_precos_servicos[nome_servico]
                     descricao = descricao_servico_orcamento(nome_servico, cap_servico, edit_quantidades_pontos.get(nome_servico, 1))
                 else:
-                    valor = 0.0
+                    valor = edit_precos_servicos[nome_servico]
                     descricao = descricao_servico_orcamento(nome_servico, None, edit_quantidades_pontos.get(nome_servico, 1))
 
                 novos_itens.append(
@@ -8456,6 +8487,47 @@ def pagina_cliente(interno=False):
             quantidades_servicos_pontos[nome_servico] = int(quantidade)
             st.caption(f"{int(quantidade)} {tipo} × valor unitário cadastrado • total automático no orçamento")
 
+    # Preços específicos deste documento: não alteram o catálogo do ADM.
+    # Quando não personalizado, cada capacidade mantém o seu próprio preço.
+    precos_personalizados_servicos = {}
+    for nome_servico in servicos:
+        capacidade_referencia = (
+            capacidade_existente if possui == "Já tenho um e também quero comprar outro"
+            else (equipamento.get("capacidade") if situacao_tem_compra(possui)
+                  and modo_compra == "Escolher um aparelho" and equipamento
+                  else capacidade)
+        )
+        preco_catalogo_servico = float(
+            config.get("servicos", {}).get(nome_servico, {})
+            .get("precos", {}).get(capacidade_referencia, 0) or 0
+        )
+        with st.container(border=True):
+            st.markdown(f"**Preço do serviço — {nome_servico}**")
+            personalizado = st.checkbox(
+                "Alterar valor somente neste orçamento",
+                key=f"cliente_preco_personalizado_{nome_servico}",
+            )
+            if personalizado:
+                preco_escolhido = st.number_input(
+                    f"Valor unitário — {nome_servico} (R$)",
+                    min_value=0.0,
+                    value=preco_catalogo_servico,
+                    step=1.0,
+                    format="%.2f",
+                    key=f"cliente_preco_serv_{nome_servico}",
+                )
+                precos_personalizados_servicos[nome_servico] = float(preco_escolhido)
+            else:
+                st.caption(f"Preço do catálogo: {dinheiro(preco_catalogo_servico)}")
+
+    def preco_unitario_novo(nome, capacidade_btu):
+        if nome in precos_personalizados_servicos:
+            return float(precos_personalizados_servicos[nome])
+        return float(
+            config.get("servicos", {}).get(nome, {})
+            .get("precos", {}).get(capacidade_btu, 0) or 0
+        )
+
     # Descontos concedidos pelo administrador somente neste orçamento.
     # Os preços do catálogo permanecem inalterados.
     descontos_servicos_novo = {}
@@ -8691,10 +8763,7 @@ def pagina_cliente(interno=False):
     def previa_servicos(capacidade_btu):
         subtotal_servicos = 0.0
         for nome_previa in servicos:
-            dados_previa = config.get("servicos", {}).get(nome_previa, {})
-            unitario = float(
-                dados_previa.get("precos", {}).get(capacidade_btu, 0) or 0
-            )
+            unitario = preco_unitario_novo(nome_previa, capacidade_btu)
             qtd_previa = float(quantidades_servicos_pontos.get(nome_previa, 1))
             bruto_previa = unitario * qtd_previa
             subtotal_servicos += aplicar_desconto(
@@ -8817,13 +8886,7 @@ def pagina_cliente(interno=False):
 
             for nome_servico in servicos:
                 dados = config["servicos"][nome_servico]
-                valor = float(
-                    dados.get("precos", {}).get(
-                        cap_servicos,
-                        0,
-                    )
-                    or 0
-                ) if cap_servicos else 0.0
+                valor = preco_unitario_novo(nome_servico, cap_servicos)
 
                 descricao_servico = (
                     descricao_servico_orcamento(nome_servico, cap_servicos, quantidades_servicos_pontos.get(nome_servico, 1))
@@ -8867,13 +8930,7 @@ def pagina_cliente(interno=False):
                 if possui == "Não, quero comprar":
                     for nome_servico in servicos:
                         dados_servico = config["servicos"][nome_servico]
-                        valor_servico = float(
-                            dados_servico.get("precos", {}).get(
-                                cap_opcao,
-                                0,
-                            )
-                            or 0
-                        )
+                        valor_servico = preco_unitario_novo(nome_servico, cap_opcao)
 
                         servicos_opcao.append(
                             {
@@ -8910,6 +8967,7 @@ def pagina_cliente(interno=False):
                         )
                         or 0
                     ) if cap_existente else 0.0
+                    valor = preco_unitario_novo(nome_servico, cap_existente)
                     descricao_servico = (
                         descricao_servico_orcamento(nome_servico, cap_existente, quantidades_servicos_pontos.get(nome_servico, 1))
                     )
@@ -8933,13 +8991,7 @@ def pagina_cliente(interno=False):
             if cap_calculo:
                 for nome_servico in servicos:
                     dados = config["servicos"][nome_servico]
-                    valor = float(
-                        dados.get("precos", {}).get(
-                            cap_calculo,
-                            0,
-                        )
-                        or 0
-                    )
+                    valor = preco_unitario_novo(nome_servico, cap_calculo)
 
                     itens.append(
                         montar_item(
@@ -8958,7 +9010,7 @@ def pagina_cliente(interno=False):
                             descricao_servico_orcamento(nome_servico, None, quantidades_servicos_pontos.get(nome_servico, 1)),
                             quantidades_servicos_pontos.get(nome_servico, 1),
                             unidade_servico_orcamento(nome_servico),
-                            0,
+                            preco_unitario_novo(nome_servico, None),
                             origem="servico",
                             desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                         )
