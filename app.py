@@ -17,6 +17,7 @@ import hashlib
 import re
 import secrets
 import unicodedata
+import calendar
 from datetime import date, timedelta, time as horario_time
 from contextlib import contextmanager
 
@@ -61,6 +62,7 @@ FINANCE_FILE = "financeiro.json"
 BUDGET_META_FILE = "orcamentos_meta.json"
 AGENDA_FILE = "agenda_disponibilidade.json"
 CLIENTES_FILE = "clientes.json"  # Cadastro privado: jamais salvar no config.json público.
+NOTIFICACOES_FILE = "avisos_manutencao.json"  # Histórico de lembretes lidos, sempre privado.
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
@@ -3444,7 +3446,7 @@ def faixas_semana_disponiveis(dia, disponibilidade):
     if dia.isoformat() in overrides:
         return overrides[dia.isoformat()]
     if dia.weekday() == 6:
-        return plano.get('domingo', [])
+        return []
     if dia.weekday() == 5:
         return plano.get('sabado', [])
     return plano.get('janelas', JANELAS_TURNO.get(plano.get('turno'), []))
@@ -3576,7 +3578,7 @@ def seletor_horarios_agenda(numero, registro, registros, disponibilidade, prefix
 
 def painel_configuracao_agenda():
     secao('Horários de trabalho', 'Configure esta semana e as próximas. A Agenda fica somente para acompanhar e reagendar serviços.')
-    st.caption('Selecione uma semana para definir o turno de segunda a sexta e os horários opcionais de sábado e domingo.')
+    st.caption('Selecione uma semana para definir o turno de segunda a sexta e os horários opcionais de sábado.')
     try:
         disponibilidade = carregar_disponibilidade_agenda()
     except Exception as e:
@@ -3628,33 +3630,6 @@ def painel_configuracao_agenda():
             key=f'qtd_sab_{chave_semana}',
             help='Use + e − para adicionar ou remover horários.',
         )
-    # Domingo é opcional e configurado independentemente do sábado.
-    domingo_atual = plano_atual.get('domingo', [])
-    modo_domingo_salvo = plano_atual.get('domingo_modo')
-    if not modo_domingo_salvo:
-        if not domingo_atual:
-            modo_domingo_salvo = 'Não trabalhar'
-        elif len(domingo_atual) == 1 and minutos_horario(domingo_atual[0][1]) <= 12 * 60:
-            modo_domingo_salvo = 'Somente manhã'
-        elif len(domingo_atual) == 1 and minutos_horario(domingo_atual[0][0]) >= 12 * 60:
-            modo_domingo_salvo = 'Somente tarde'
-        else:
-            modo_domingo_salvo = 'Personalizar horários'
-    modos_domingo = ['Não trabalhar', 'Somente manhã', 'Somente tarde', 'Personalizar horários']
-    modo_domingo = st.selectbox(
-        'Disponibilidade de domingo', modos_domingo,
-        index=modos_domingo.index(modo_domingo_salvo) if modo_domingo_salvo in modos_domingo else 0,
-        key=f'agenda_modo_domingo_{chave_semana}',
-        help='Defina um turno, ou horários personalizados para o domingo.',
-    )
-    qtd_dom = 0
-    if modo_domingo == 'Personalizar horários':
-        qtd_dom = st.number_input(
-            'Quantidade de faixas no domingo', min_value=1, max_value=6,
-            value=max(1, len(domingo_atual)), step=1,
-            key=f'qtd_dom_{chave_semana}',
-            help='Use + e − para adicionar ou remover horários.',
-        )
     with st.form(f'agenda_semana_form_{chave_semana}'):
         turno = st.radio(
             'Turno do trabalho principal (segunda a sexta)', turnos,
@@ -3692,28 +3667,6 @@ def painel_configuracao_agenda():
                 sabado.append(selecionar_faixa_agenda(
                     f'sab_{chave_semana}_{indice}', inicio=janela[0], fim=janela[1],
                 ))
-        st.markdown('**Domingo**')
-        domingo = []
-        if modo_domingo == 'Não trabalhar':
-            st.caption('Domingo indisponível nesta semana.')
-        elif modo_domingo in ('Somente manhã', 'Somente tarde'):
-            horario_padrao_dom = (['08:00', '11:30'] if modo_domingo == 'Somente manhã'
-                                   else ['13:00', '17:00'])
-            horario_anterior_dom = domingo_atual[0] if (
-                modo_domingo_salvo == modo_domingo and len(domingo_atual) == 1
-            ) else horario_padrao_dom
-            st.caption('Ajuste início e fim caso necessário.')
-            domingo.append(selecionar_faixa_agenda(
-                f'dom_unico_{chave_semana}_{modo_domingo}',
-                inicio=horario_anterior_dom[0], fim=horario_anterior_dom[1],
-            ))
-        else:
-            for indice in range(int(qtd_dom)):
-                st.caption(f'Faixa {indice+1} do domingo')
-                janela = domingo_atual[indice] if indice < len(domingo_atual) else ['08:00', '11:30']
-                domingo.append(selecionar_faixa_agenda(
-                    f'dom_{chave_semana}_{indice}', inicio=janela[0], fim=janela[1],
-                ))
         salvar_semana = st.form_submit_button('Salvar horários desta semana',
             type='primary', use_container_width=True)
     if salvar_semana:
@@ -3721,11 +3674,9 @@ def painel_configuracao_agenda():
             janelas_turno = normalizar_faixas_agenda(
                 [horario_manual] if personalizar else JANELAS_TURNO[turno])
             sabado = normalizar_faixas_agenda(sabado)
-            domingo = normalizar_faixas_agenda(domingo)
             disponibilidade.setdefault('semanas_turnos', {})[chave_semana] = {
                 'turno': turno, 'manual': bool(personalizar),
                 'janelas': janelas_turno, 'sabado': sabado, 'sabado_modo': modo_sabado,
-                'domingo': domingo, 'domingo_modo': modo_domingo,
                 'dias_especiais': copy.deepcopy(plano_atual.get('dias_especiais', {})),
             }
             salvar_disponibilidade_agenda(disponibilidade)
@@ -4026,69 +3977,60 @@ def confirmar_faturamento_agenda(numero):
 
 
 def exibir_compromisso(dt, registro, *, atrasado=False, realizado=False, contexto="agenda"):
-    """Cartão compacto com contato à direita e ações pequenas abaixo."""
     from html import escape
-
-    cliente = registro.get("cliente") or {}
-    nome = escape(str(cliente.get("nome") or "Cliente"))
+    nome = escape(str(registro.get("cliente", {}).get("nome", "Cliente")))
     ag = registro.get("agendamento") or {}
-    local = escape(str(ag.get("local") or cliente.get("cidade") or "Local não informado"))
-    servico = escape(str(descricao_agendamento(registro)))
+    cidade = registro.get("cliente", {}).get("cidade", "")
+    local = escape(str(ag.get("local", "") or cidade or "Local não informado"))
+    servico = escape(descricao_agendamento(registro))
     numero = str(registro.get("numero", "")).zfill(4)
     numero_html = escape(numero)
     cor = "#35c584" if realizado else "#ff7770" if atrasado else "#ff821d"
     situacao = "REALIZADO" if realizado else "PENDENTE · DATA PASSADA" if atrasado else "AGENDADO"
-    duracao = int(ag.get("duracao_minutos", 60) or 60)
-    termino = dt + timedelta(minutes=duracao)
-
-    destino = url_whatsapp_cliente(cliente)
-    contato_html = (
-        f'<a class="fc-agenda-wa" href="{escape(destino, quote=True)}" '
-        'target="_blank" rel="noopener noreferrer" title="Chamar cliente" '
-        'aria-label="Chamar cliente no WhatsApp">'
-        '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" '
-        'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
-        'stroke-linejoin="round" aria-hidden="true">'
-        '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
-        '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
-        '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
-        '</svg></a>'
-    ) if destino else ""
-
-    st.markdown(
-        f'<div class="fc-agenda-card" style="border-left-color:{cor}">'
-        '<div class="fc-agenda-card-content">'
-        f'<div class="fc-agenda-name">{dt.strftime("%d/%m/%Y")} · {dt.strftime("%H:%M")} — {nome}</div>'
-        f'<div class="fc-agenda-desc">{servico} · até {termino.strftime("%H:%M")}</div>'
-        f'<div class="fc-agenda-location">{local} · Pedido #{numero_html}</div>'
-        f'<div class="fc-agenda-status" style="color:{cor}">{situacao}</div>'
-        '</div>' + contato_html + '</div>',
-        unsafe_allow_html=True,
-    )
-
+    duracao=int(ag.get('duracao_minutos',60) or 60)
+    termino=dt+timedelta(minutes=duracao)
+    coluna_agenda, coluna_wa = st.columns([11, 1.5], gap="small", vertical_alignment="center")
+    with coluna_agenda:
+        st.markdown(
+        f"<div style='margin:6px 0 5px;padding:12px 14px;border:1px solid #25466e;"
+        f"border-left:4px solid {cor};border-radius:13px;background:#101a2a'>"
+        f"<div style='font-weight:850;color:#fff;font-size:15px'>{dt.strftime('%d/%m/%Y')} · {dt.strftime('%H:%M')} — {nome}</div>"
+        f"<div style='color:#75baff;font-weight:700;font-size:13px;margin-top:4px'>{servico} · até {termino.strftime('%H:%M')}</div>"
+        f"<div style='color:#c6d5e8;font-size:12px;margin-top:5px'>📍 {local} · Pedido #{numero_html}</div>"
+        f"<div style='font-size:11px;font-weight:800;color:{cor};margin-top:6px'>{situacao}</div>"
+        f"</div>", unsafe_allow_html=True,
+        )
+    with coluna_wa:
+        destino = url_whatsapp_cliente(registro.get("cliente", {}))
+        if destino:
+            st.markdown(
+                f'<a href="{destino}" target="_blank" rel="noopener noreferrer" '
+                'title="Chamar cliente" aria-label="Chamar cliente no WhatsApp" '
+                'style="display:flex;align-items:center;justify-content:center;'
+                'height:38px;border:1px solid #2d8e70;background:#112b29;'
+                'border-radius:11px;color:#35d69a;text-decoration:none">'
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" '
+                'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+                'stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
+                '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
+                '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
+                '</svg></a>',
+                unsafe_allow_html=True,
+            )
     if registro.get("status") == "Pedido de venda":
-        with st.container(key=f"fc_agenda_actions_{contexto}_{numero}"):
-            if realizado:
-                a, _ = st.columns([1, 1], gap="small")
-                with a:
-                    if st.button("Concluir venda", icon=":material/check_circle:",
-                                 key=f"{contexto}_faturar_{numero}", use_container_width=True):
-                        confirmar_faturamento_agenda(numero)
-            else:
-                a, b, c = st.columns(3, gap="small")
-                with a:
-                    if st.button("Realizado", icon=":material/done:",
-                                 key=f"{contexto}_realizar_{numero}", use_container_width=True):
-                        confirmar_servico_realizado(numero)
-                with b:
-                    if st.button("Concluir", icon=":material/check_circle:",
-                                 key=f"{contexto}_faturar_{numero}", use_container_width=True,
-                                 help="Concluir venda"):
-                        confirmar_faturamento_agenda(numero)
-                with c:
-                    if st.button("Reagendar", icon=":material/event_repeat:",
-                                 key=f"{contexto}_reagendar_{numero}", use_container_width=True):
-                        reagendar_por_impedimento(numero)
+        if realizado:
+            if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
+                confirmar_faturamento_agenda(numero)
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✓ Serviço realizado", key=f"{contexto}_realizar_{numero}", use_container_width=True):
+                    confirmar_servico_realizado(numero)
+            with c2:
+                if st.button("Concluir venda", key=f"{contexto}_faturar_{numero}", use_container_width=True):
+                    confirmar_faturamento_agenda(numero)
+            if st.button("⚠ Não será possível realizar · reagendar", key=f"{contexto}_reagendar_{numero}", use_container_width=True):
+                reagendar_por_impedimento(numero)
     elif realizado:
         st.caption("Venda concluída · registro mantido no histórico")
 
@@ -5168,14 +5110,9 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                                     key=f"adm_add_serv_desc_{numero}",
                                 )
 
-                            preco_servico = st.number_input(
-                                "Valor unitário neste orçamento (R$)",
-                                min_value=0.0,
-                                value=float(preco_servico),
-                                step=1.0,
-                                format="%.2f",
-                                key=f"adm_add_serv_preco_{numero}",
-                                help="Este valor vale somente para este documento.",
+                            st.caption(
+                                f"Preço cadastrado para {capacidade_serv}: "
+                                f"{dinheiro(preco_servico)}"
                             )
 
                             if servico_qtd > 0:
@@ -6642,6 +6579,213 @@ def aba_gestao_comercial():
     st.caption("Previsões não são recebimentos. Abaixo estão os detalhes e filtros por período.")
 
 
+
+# =========================================================
+# AVISOS DE RETORNO — 6 MESES DEPOIS DO ÚLTIMO SERVIÇO
+# =========================================================
+
+def _data_execucao_aviso(registro):
+    """Utiliza a conclusão efetiva, nunca apenas a criação de um orçamento."""
+    if not servico_ja_realizado(registro):
+        return None
+    ag = registro.get("agendamento") or {}
+    for texto in (
+        ag.get("realizado_em"),
+        registro.get("data_status") if registro.get("status") == "Faturado / Concluído" else None,
+        (str(ag.get("data", "")) + " " + str(ag.get("hora", ""))).strip() if ag.get("data") else None,
+    ):
+        if not texto:
+            continue
+        if isinstance(texto, datetime):
+            return texto.date()
+        for formato in ("%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(str(texto).strip(), formato).date()
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+def _tipo_servico_aviso(registro):
+    """Evita gerar avisos para propostas e vendas apenas de equipamento."""
+    textos = [str(descricao_agendamento(registro) or "")]
+    textos.extend(str(i.get("descricao", "")) for i in registro.get("itens", []) if i.get("origem") == "servico")
+    texto = _nome_normalizado_cliente(" ".join(textos))
+    if "higien" in texto or "limpeza" in texto:
+        return "Higienização"
+    if "instal" in texto or "infraestrutura" in texto:
+        return "Instalação"
+    if "manutenc" in texto or "carga de gas" in texto or "reparo" in texto:
+        return "Manutenção"
+    # Outros serviços executados também reiniciam a contagem se forem
+    # explicitamente identificados como serviço, mas não vendas avulsas.
+    if any(i.get("origem") == "servico" for i in registro.get("itens", [])):
+        return "Serviço"
+    return None
+
+
+def _qtd_aparelhos_aviso(registro):
+    lista = list(registro.get("itens", []))
+    for op in registro.get("opcoes_equipamentos", []):
+        lista.extend(op.get("servicos", []))
+    quantidades = []
+    for item in lista:
+        nome = _nome_normalizado_cliente(item.get("descricao", ""))
+        if any(t in nome for t in ("higien", "limpeza", "instal", "manutenc", "carga de gas")):
+            try:
+                quantidades.append(max(1, int(float(item.get("quantidade", 1) or 1))))
+            except (ValueError, TypeError):
+                pass
+    return max(quantidades) if quantidades else 1
+
+
+def _mais_seis_meses(dia):
+    mes_serie = (dia.year * 12 + dia.month - 1) + 6
+    ano, mes_zero = divmod(mes_serie, 12)
+    mes = mes_zero + 1
+    return date(ano, mes, min(dia.day, calendar.monthrange(ano, mes)[1]))
+
+
+def calcular_avisos_retorno(registros, hoje=None):
+    """Um ciclo por DDD+telefone: serviço posterior sempre substitui o anterior."""
+    hoje = hoje or datetime.now(FUSO_BRASILIA).date()
+    recentes = {}
+    for registro in registros:
+        cliente = registro.get("cliente") or {}
+        telefone = _telefone_chave_cliente(cliente.get("telefone"))
+        if not telefone or not validar_telefone_cliente(telefone):
+            continue
+        dia = _data_execucao_aviso(registro)
+        if not dia or dia > hoje:
+            continue
+        tipo = _tipo_servico_aviso(registro)
+        if not tipo:
+            continue
+        numero = str(registro.get("numero", "")).zfill(4)
+        # Última data, com o número como critério de desempate estável.
+        anterior = recentes.get(telefone)
+        if anterior and (dia, numero) <= (anterior["data_servico"], anterior["numero"]):
+            continue
+        recentes[telefone] = {
+            "id": f"{telefone}:{dia.isoformat()}:{numero}",
+            "telefone": telefone,
+            "cliente": str(cliente.get("nome") or "Cliente").strip(),
+            "data_servico": dia,
+            "vencimento": _mais_seis_meses(dia),
+            "tipo": tipo,
+            "numero": numero,
+            "quantidade": _qtd_aparelhos_aviso(registro),
+        }
+    return sorted(
+        (aviso for aviso in recentes.values() if aviso["vencimento"] <= hoje),
+        key=lambda aviso: (aviso["vencimento"], aviso["cliente"].casefold()),
+    )
+
+
+def mensagem_retorno_whatsapp(aviso):
+    nome = aviso["cliente"].split()[0].strip()
+    tipo = aviso["tipo"]
+    qtd = int(aviso.get("quantidade", 1) or 1)
+    saudacao = f"Olá, {nome}! Tudo bem? Aqui é da F Climatização. "
+    if tipo == "Higienização":
+        trabalho = f"a higienização de {qtd} aparelho(s)" if qtd > 1 else "a higienização do seu ar-condicionado"
+        corpo = f"Já se passaram seis meses desde {trabalho}. Uma nova higienização ajuda a manter a qualidade do ar e o desempenho do equipamento."
+    elif tipo == "Instalação":
+        corpo = "Já se passaram seis meses desde a instalação do seu ar-condicionado. Uma higienização preventiva ajuda a manter a qualidade do ar e o bom funcionamento do aparelho."
+    else:
+        corpo = "Já se passaram seis meses desde nosso último serviço no seu ar-condicionado. É um bom momento para avaliar uma higienização preventiva e manter o equipamento em boas condições."
+    return saudacao + corpo + " Gostaria de agendar uma avaliação ou higienização conosco?"
+
+
+def _carregar_leituras_aviso():
+    """Guarda status de leitura apenas no repositório privado."""
+    dados = _consulta_sessao_github(DATA_REPO, NOTIFICACOES_FILE, json_decodificado=True)
+    if dados is None:
+        return {"lidos": {}}
+    if not isinstance(dados, dict) or not isinstance(dados.get("lidos", {}), dict):
+        raise ValueError("Formato do histórico de notificações inválido")
+    return {"lidos": dados.get("lidos", {})}
+
+
+def _marcar_aviso_lido(aviso, estado):
+    """Não altera dados caso GitHub esteja indisponível."""
+    estado = copy.deepcopy(estado)
+    estado.setdefault("lidos", {})[aviso["id"]] = {
+        "nome": aviso["cliente"], "telefone": aviso["telefone"],
+        "tipo": aviso["tipo"],
+        "data_servico": aviso["data_servico"].isoformat(),
+        "lido_em": datetime.now(FUSO_BRASILIA).isoformat(timespec="seconds"),
+    }
+    texto = json.dumps(estado, ensure_ascii=False, indent=2)
+    _, sha = github_get_file(DATA_REPO, NOTIFICACOES_FILE)
+    github_put_file(DATA_REPO, NOTIFICACOES_FILE, texto,
+                    "Marca lembrete de manutenção como lido", sha=sha)
+    return estado
+
+
+def painel_avisos_manutencao(registros):
+    """Sino discreto visível apenas quando há lembretes novos ou já lidos."""
+    avisos = calcular_avisos_retorno(registros)
+    try:
+        estado = _carregar_leituras_aviso() if avisos else {"lidos": {}}
+    except Exception:
+        # Falha de rede jamais deve travar o painel principal.
+        return
+    lidos = estado.get("lidos", {})
+    pendentes = [a for a in avisos if a["id"] not in lidos]
+    if not avisos:
+        return
+    st.markdown("""
+<style>
+div[class*="st-key-fc_notification_bell"] button {min-height:34px !important;
+  width:auto !important; padding:3px 10px !important; border-radius:10px !important;}
+</style>""", unsafe_allow_html=True)
+    espaco, sino = st.columns([8, 1], gap="small", vertical_alignment="center")
+    with sino:
+        label = str(len(pendentes)) if pendentes else " "
+        if st.button(label, icon=":material/notifications:",
+                     help="Lembretes de manutenção", key="fc_notification_bell"):
+            dialogo_avisos_manutencao(avisos)
+
+
+@st.dialog("Lembretes de manutenção")
+def dialogo_avisos_manutencao(avisos):
+    try:
+        estado = _carregar_leituras_aviso()
+    except Exception as exc:
+        st.error(f"Não foi possível consultar os avisos: {exc}")
+        return
+    lidos = estado.get("lidos", {})
+    for aviso in sorted(avisos, key=lambda a: a["id"] in lidos):
+        ja_lido = aviso["id"] in lidos
+        with st.container(border=True):
+            st.markdown(("<span style='color:#8190a4'>" if ja_lido else "<span style='color:#f6f9ff'>")
+                        + "**" + aviso["cliente"].replace("<", "&lt;").replace(">", "&gt;") + "**</span>",
+                        unsafe_allow_html=True)
+            st.caption(f'{aviso["telefone"]} · {aviso["tipo"]} · {aviso["quantidade"]} aparelho(s)')
+            st.caption(f'Serviço: {aviso["data_servico"].strftime("%d/%m/%Y")} · Pedido #{aviso["numero"]}')
+            telefone = aviso["telefone"]
+            if ja_lido:
+                from urllib.parse import quote as url_quote
+                destino_lido = ("https://wa.me/55" + telefone + "?text="
+                                + url_quote(mensagem_retorno_whatsapp(aviso)))
+                st.link_button("WhatsApp", destino_lido, use_container_width=False)
+            elif st.button("Chamar cliente", key="fc_aviso_" + hashlib.sha256(aviso["id"].encode()).hexdigest()[:18],
+                           icon=":material/chat:"):
+                try:
+                    _marcar_aviso_lido(aviso, estado)
+                except Exception as exc:
+                    st.error(f"Falha ao salvar a leitura: {exc}")
+                    return
+                from urllib.parse import quote as url_quote
+                destino = "https://wa.me/55" + telefone + "?text=" + url_quote(mensagem_retorno_whatsapp(aviso))
+                st.session_state["_fc_ultimo_whatsapp_aviso"] = destino
+                # Tenta abrir automaticamente e mostra um link manual se o
+                # navegador bloquear a abertura de outra janela.
+                components.html("<script>window.open(" + json.dumps(destino) + ", '_blank');</script>", height=0)
+                st.link_button("Abrir WhatsApp", destino)
+                st.caption("Aviso marcado como lido.")
+
 def painel_semana_admin(registros):
     """Agenda desta semana em ordem cronológica, com acesso à agenda completa."""
     from html import escape
@@ -6684,26 +6828,13 @@ def painel_semana_admin(registros):
             servico = escape(str(descricao_agendamento(registro)))
             ag = registro.get("agendamento") or {}
             local = escape(str(ag.get("endereco") or (registro.get("cliente") or {}).get("cidade") or "Local a confirmar"))
-            destino_wa = url_whatsapp_cliente(registro.get("cliente") or {})
-            icone_contato = (
-                f'<a class="fc-home-wa" href="{escape(destino_wa, quote=True)}" '
-                'target="_blank" rel="noopener noreferrer" '
-                'title="Chamar cliente" aria-label="Chamar cliente no WhatsApp">'
-                '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" '
-                'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
-                'stroke-linejoin="round" aria-hidden="true">'
-                '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8"/>'
-                '<path d="M18.8 18.3A9 9 0 0 1 6 18l-4 1 1-4a9 9 0 1 1 15.8 3.3Z"/>'
-                '<path d="M8 9c0 3 3 6 6 6l2-2-2-1-1 1c-1.5-.7-2.3-1.5-3-3l1-1-1-2Z"/>'
-                '</svg></a>'
-            ) if destino_wa else ""
             itens_html.append(
                 '<div class="fc-home-event">'
                 f'<div class="fc-home-event-time">{momento.strftime("%H:%M")}</div>'
                 '<div class="fc-home-event-info">'
                 f'<strong>{nome}</strong><span>{servico}</span>'
                 f'<small>{local} · Pedido #{numero}</small>'
-                '</div>' + icone_contato + '</div>'
+                '</div></div>'
             )
         conteudo = "".join(itens_html) if itens_html else '<div class="fc-home-empty">Nenhum serviço agendado</div>'
         quantidade = f"{len(compromissos)} serviço(s)" if compromissos else "Livre"
@@ -6743,20 +6874,6 @@ def estilo_dashboard_admin():
 .fc-home-event-info strong {color:#f4f8ff;font-size:12px;}
 .fc-home-event-info span {color:#b6c8df;font-size:11px;}
 .fc-home-event-info small {color:#94a6bc;font-size:10px;}
-.fc-home-event-info {flex:1 1 auto;}
-.fc-home-wa, .fc-agenda-wa {display:inline-flex;flex:0 0 33px;align-items:center;justify-content:center;width:33px;height:33px;border-radius:10px;border:1px solid #285a4d;background:#152820;color:#43d69c;text-decoration:none;align-self:center;}
-.fc-home-wa:hover,.fc-agenda-wa:hover {background:#1e4034;border-color:#3eaf80;color:#72edb9;}
-.fc-agenda-card {display:flex;gap:9px;align-items:flex-start;margin:6px 0 5px;padding:11px 12px;border:1px solid #25466e;border-left:4px solid;border-radius:13px;background:#101a2a;}
-.fc-agenda-card-content {flex:1 1 auto;min-width:0;overflow-wrap:anywhere;}
-.fc-agenda-name {font-weight:850;color:#fff;font-size:14px;}
-.fc-agenda-desc {color:#75baff;font-weight:700;font-size:12px;margin-top:4px;}
-.fc-agenda-location {color:#c6d5e8;font-size:11px;margin-top:5px;}
-.fc-agenda-status {font-size:10px;font-weight:800;margin-top:5px;}
-/* Somente os controles da agenda; duas ou três ações realmente lado a lado no celular. */
-div[class*="st-key-fc_agenda_actions_"] div[data-testid="stHorizontalBlock"] {display:flex !important;flex-flow:row nowrap !important;gap:6px !important;align-items:stretch !important;}
-div[class*="st-key-fc_agenda_actions_"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {min-width:0 !important;width:0 !important;flex:1 1 0 !important;}
-div[class*="st-key-fc_agenda_actions_"] button {width:100% !important;min-height:35px !important;padding:5px 3px !important;font-size:11px !important;border-radius:9px !important;line-height:1.2 !important;white-space:normal !important;}
-div[class*="st-key-fc_agenda_actions_"] button span[data-testid="stIconMaterial"] {font-size:15px !important;}
 .fc-home-grid-title {font-size:17px;font-weight:850;color:#f1f8ff;margin:20px 0 10px;}
 div[class*="st-key-fc_atalho_"] button {min-height:64px !important;background:linear-gradient(140deg,#172339,#121a29) !important;border:1px solid #2b4669 !important;border-radius:14px !important;color:#f0f7ff !important;box-shadow: 0 3px 12px #0003 !important;padding:7px 5px !important;font-size:11px !important;font-weight:750 !important;white-space:normal !important;line-height:1.35 !important;}
 div[class*="st-key-fc_atalho_"] button:hover {border-color:#3996ff !important;background:#1c2d45 !important;}
@@ -6882,6 +6999,7 @@ def pagina_admin():
 
     if pagina == "painel":
         registros_resumo = carregar_orcamentos()
+        painel_avisos_manutencao(registros_resumo)
         painel_semana_admin(registros_resumo)
         atalhos_inicio_admin()
     else:
@@ -7493,28 +7611,6 @@ def editor_orcamento_cliente():
                     help="O valor unitário é multiplicado pela quantidade escolhida.",
                 )
 
-    # Preço unitário do serviço neste registro, sem alterar o cadastro geral.
-    edit_precos_servicos = {}
-    for nome_servico in edit_servicos:
-        valor_base = precos_servicos_atuais.get(nome_servico)
-        if valor_base is None:
-            referencia = (
-                edit_capacidade_existente if edit_possui == "Já tenho um e também quero comprar outro"
-                else edit_capacidade
-            )
-            valor_base = float(
-                config.get("servicos", {}).get(nome_servico, {})
-                .get("precos", {}).get(referencia, 0) or 0
-            )
-        edit_precos_servicos[nome_servico] = float(st.number_input(
-            f"Valor unitário do serviço — {nome_servico} (R$)",
-            min_value=0.0,
-            value=float(valor_base),
-            step=1.0,
-            format="%.2f",
-            key=f"edit_preco_serv_{numero}_{nome_servico}",
-        ))
-
     # -----------------------------------------------------
     # MATERIAIS / QUANTIDADES
     # -----------------------------------------------------
@@ -7857,7 +7953,6 @@ def editor_orcamento_cliente():
                         or 0
                     ) if cap_servico_editor else 0.0
 
-                    valor = edit_precos_servicos[nome_servico]
                     descricao_servico = descricao_servico_orcamento(nome_servico, cap_servico_editor, edit_quantidades_pontos.get(nome_servico, 1))
 
                     novos_itens.append(
@@ -7901,7 +7996,6 @@ def editor_orcamento_cliente():
                                 or 0
                             )
 
-                            valor = edit_precos_servicos[nome_servico]
                             servicos_eq.append(
                                 {
                                     "descricao": descricao_servico_orcamento(nome_servico, cap_eq, edit_quantidades_pontos.get(nome_servico, 1)),
@@ -7946,7 +8040,6 @@ def editor_orcamento_cliente():
                             )
                             or 0
                         ) if cap_existente_editor else 0.0
-                        valor = edit_precos_servicos[nome_servico]
                         descricao = (
                             descricao_servico_orcamento(nome_servico, cap_existente_editor, edit_quantidades_pontos.get(nome_servico, 1))
                         )
@@ -7987,10 +8080,9 @@ def editor_orcamento_cliente():
                         )
                         or 0
                     )
-                    valor = edit_precos_servicos[nome_servico]
                     descricao = descricao_servico_orcamento(nome_servico, cap_servico, edit_quantidades_pontos.get(nome_servico, 1))
                 else:
-                    valor = edit_precos_servicos[nome_servico]
+                    valor = 0.0
                     descricao = descricao_servico_orcamento(nome_servico, None, edit_quantidades_pontos.get(nome_servico, 1))
 
                 novos_itens.append(
@@ -8487,47 +8579,6 @@ def pagina_cliente(interno=False):
             quantidades_servicos_pontos[nome_servico] = int(quantidade)
             st.caption(f"{int(quantidade)} {tipo} × valor unitário cadastrado • total automático no orçamento")
 
-    # Preços específicos deste documento: não alteram o catálogo do ADM.
-    # Quando não personalizado, cada capacidade mantém o seu próprio preço.
-    precos_personalizados_servicos = {}
-    for nome_servico in servicos:
-        capacidade_referencia = (
-            capacidade_existente if possui == "Já tenho um e também quero comprar outro"
-            else (equipamento.get("capacidade") if situacao_tem_compra(possui)
-                  and modo_compra == "Escolher um aparelho" and equipamento
-                  else capacidade)
-        )
-        preco_catalogo_servico = float(
-            config.get("servicos", {}).get(nome_servico, {})
-            .get("precos", {}).get(capacidade_referencia, 0) or 0
-        )
-        with st.container(border=True):
-            st.markdown(f"**Preço do serviço — {nome_servico}**")
-            personalizado = st.checkbox(
-                "Alterar valor somente neste orçamento",
-                key=f"cliente_preco_personalizado_{nome_servico}",
-            )
-            if personalizado:
-                preco_escolhido = st.number_input(
-                    f"Valor unitário — {nome_servico} (R$)",
-                    min_value=0.0,
-                    value=preco_catalogo_servico,
-                    step=1.0,
-                    format="%.2f",
-                    key=f"cliente_preco_serv_{nome_servico}",
-                )
-                precos_personalizados_servicos[nome_servico] = float(preco_escolhido)
-            else:
-                st.caption(f"Preço do catálogo: {dinheiro(preco_catalogo_servico)}")
-
-    def preco_unitario_novo(nome, capacidade_btu):
-        if nome in precos_personalizados_servicos:
-            return float(precos_personalizados_servicos[nome])
-        return float(
-            config.get("servicos", {}).get(nome, {})
-            .get("precos", {}).get(capacidade_btu, 0) or 0
-        )
-
     # Descontos concedidos pelo administrador somente neste orçamento.
     # Os preços do catálogo permanecem inalterados.
     descontos_servicos_novo = {}
@@ -8763,7 +8814,10 @@ def pagina_cliente(interno=False):
     def previa_servicos(capacidade_btu):
         subtotal_servicos = 0.0
         for nome_previa in servicos:
-            unitario = preco_unitario_novo(nome_previa, capacidade_btu)
+            dados_previa = config.get("servicos", {}).get(nome_previa, {})
+            unitario = float(
+                dados_previa.get("precos", {}).get(capacidade_btu, 0) or 0
+            )
             qtd_previa = float(quantidades_servicos_pontos.get(nome_previa, 1))
             bruto_previa = unitario * qtd_previa
             subtotal_servicos += aplicar_desconto(
@@ -8886,7 +8940,13 @@ def pagina_cliente(interno=False):
 
             for nome_servico in servicos:
                 dados = config["servicos"][nome_servico]
-                valor = preco_unitario_novo(nome_servico, cap_servicos)
+                valor = float(
+                    dados.get("precos", {}).get(
+                        cap_servicos,
+                        0,
+                    )
+                    or 0
+                ) if cap_servicos else 0.0
 
                 descricao_servico = (
                     descricao_servico_orcamento(nome_servico, cap_servicos, quantidades_servicos_pontos.get(nome_servico, 1))
@@ -8930,7 +8990,13 @@ def pagina_cliente(interno=False):
                 if possui == "Não, quero comprar":
                     for nome_servico in servicos:
                         dados_servico = config["servicos"][nome_servico]
-                        valor_servico = preco_unitario_novo(nome_servico, cap_opcao)
+                        valor_servico = float(
+                            dados_servico.get("precos", {}).get(
+                                cap_opcao,
+                                0,
+                            )
+                            or 0
+                        )
 
                         servicos_opcao.append(
                             {
@@ -8967,7 +9033,6 @@ def pagina_cliente(interno=False):
                         )
                         or 0
                     ) if cap_existente else 0.0
-                    valor = preco_unitario_novo(nome_servico, cap_existente)
                     descricao_servico = (
                         descricao_servico_orcamento(nome_servico, cap_existente, quantidades_servicos_pontos.get(nome_servico, 1))
                     )
@@ -8991,7 +9056,13 @@ def pagina_cliente(interno=False):
             if cap_calculo:
                 for nome_servico in servicos:
                     dados = config["servicos"][nome_servico]
-                    valor = preco_unitario_novo(nome_servico, cap_calculo)
+                    valor = float(
+                        dados.get("precos", {}).get(
+                            cap_calculo,
+                            0,
+                        )
+                        or 0
+                    )
 
                     itens.append(
                         montar_item(
@@ -9010,7 +9081,7 @@ def pagina_cliente(interno=False):
                             descricao_servico_orcamento(nome_servico, None, quantidades_servicos_pontos.get(nome_servico, 1)),
                             quantidades_servicos_pontos.get(nome_servico, 1),
                             unidade_servico_orcamento(nome_servico),
-                            preco_unitario_novo(nome_servico, None),
+                            0,
                             origem="servico",
                             desconto_percentual=descontos_servicos_novo.get(nome_servico, 0),
                         )
