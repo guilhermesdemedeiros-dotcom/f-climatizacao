@@ -2200,30 +2200,74 @@ def compartilhar_pdf(pdf_bytes, nome_arquivo, titulo="Orçamento F Climatizaçã
 
 
 def compartilhar_pdf_com_cliente(pdf_bytes, nome_arquivo, orcamento):
-    """Compartilhamento único do PDF pelo menu nativo do celular.
+    """Dois botões iguais e responsivos, sem colunas Streamlit empilhadas.
 
-    O destinatário é escolhido manualmente pelo administrador no aplicativo
-    de compartilhamento. Não envia mensagens nem abre conversas automaticamente.
-    Mantém esta assinatura para compatibilidade com as telas existentes.
+    Compartilhar usa a folha nativa de compartilhamento de PDF, e Chamar
+    cliente abre a conversa do WhatsApp sem mensagem predefinida.
     """
-    esquerdo, direito = st.columns(2, gap="small")
-    with esquerdo:
-        compartilhar_pdf(pdf_bytes, nome_arquivo)
-    with direito:
-        destino = url_whatsapp_cliente(orcamento.get("cliente", {}))
-        if destino:
-            st.markdown(
-                '<a href="' + destino + '" target="_blank" rel="noopener noreferrer" '
-                'style="display:flex;align-items:center;justify-content:center;'
-                'height:48px;margin:0;border-radius:14px;border:1px solid #1891ff;'
-                'background:#0758b9;color:white;text-decoration:none;'
-                'font-size:13px;font-weight:750;text-align:center">Chamar cliente</a>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.button("Chamar cliente", disabled=True, use_container_width=True,
-                      key=f"wa_sem_numero_{orcamento.get('numero','sem_numero')}")
+    from html import escape
 
+    destino = url_whatsapp_cliente((orcamento or {}).get("cliente", {}))
+    destino_seguro = escape(destino or "", quote=True)
+    desabilitado = "disabled" if not destino else ""
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    nome_json = json.dumps(str(nome_arquivo), ensure_ascii=False)
+    nome_download = escape(str(nome_arquivo), quote=True)
+
+    html = f"""
+    <!doctype html><html lang="pt-BR"><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+      *, *::before, *::after {{ box-sizing: border-box; }}
+      html, body {{ width: 100%; margin: 0; padding: 0; background: transparent; overflow-x:hidden;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+      .dupla {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; width:100%; }}
+      .acao {{ display:flex; align-items:center; justify-content:center; width:100%; min-width:0;
+        height:48px; padding:4px 6px; border:1px solid #1891ff; border-radius:13px;
+        background:linear-gradient(90deg,#0758b9,#0878e8); color:#fff;
+        text-decoration:none; font-weight:750; font-size:clamp(11px,3.5vw,14px);
+        white-space:nowrap; cursor:pointer; text-align:center; line-height:1.15; }}
+      .acao:disabled {{ opacity:.50; cursor:not-allowed; }}
+      .fallback {{ display:none; margin-top:5px; font-size:11px; text-align:center; color:#b7c7da; }}
+      .fallback a {{ color:#61b5ff; }}
+    </style></head><body>
+      <div class="dupla">
+        <button id="shareBtn" class="acao" type="button">Compartilhar</button>
+        <a class="acao" id="contactBtn" href="{destino_seguro}" target="_blank"
+           rel="noopener noreferrer" {desabilitado}>Chamar cliente</a>
+      </div>
+      <div class="fallback" id="fallback">Compartilhamento indisponível.
+        <a id="downloadLink" download="{nome_download}">Baixar PDF</a>
+      </div>
+      <script>
+        const fileName = {nome_json};
+        const binary=atob("{pdf_b64}");
+        const bytes=new Uint8Array(binary.length);
+        for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+        const blob=new Blob([bytes], {{type:'application/pdf'}});
+        const file=new File([blob],fileName,{{type:'application/pdf'}});
+        const fallback=document.getElementById('fallback');
+        const link=document.getElementById('downloadLink');
+        const url=URL.createObjectURL(blob);
+        link.href=url;
+        document.getElementById('shareBtn').addEventListener('click',async()=>{{
+          try{{
+            if(navigator.share && navigator.canShare && navigator.canShare({{files:[file]}})){{
+              await navigator.share({{files:[file]}});
+            }} else {{ fallback.style.display='block'; link.click(); }}
+          }}catch(error){{
+            if(error?.name!=='AbortError') fallback.style.display='block';
+          }}
+        }});
+        if(!{str(bool(destino)).lower()}){{
+          document.getElementById('contactBtn').removeAttribute('href');
+          document.getElementById('contactBtn').setAttribute('aria-disabled','true');
+          document.getElementById('contactBtn').style.opacity='.5';
+        }}
+        window.addEventListener('beforeunload',()=>URL.revokeObjectURL(url));
+      </script>
+    </body></html>
+    """
+    components.html(html, height=74, scrolling=False)
 
 
 def mostrar_referencia_capacidade(capacidade):
