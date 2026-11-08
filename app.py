@@ -6723,68 +6723,166 @@ def _marcar_aviso_lido(aviso, estado):
     return estado
 
 
+def _aviso_teste_fabricio():
+    """Notificação de teste para o número informado pelo administrador."""
+    hoje = datetime.now(FUSO_BRASILIA).date()
+    return {
+        "id": "fc_teste_notificacao_fabricio_v1",
+        "cliente": "Fabrício Pereira",
+        "telefone": "54996523476",
+        "tipo": "Higienização",
+        "quantidade": 1,
+        "data_servico": date(hoje.year - 1, hoje.month, min(hoje.day, calendar.monthrange(hoje.year - 1, hoje.month)[1])),
+        "vencimento": hoje,
+        "numero": "TESTE",
+        "teste": True,
+    }
+
+
+def _avisos_visiveis(registros):
+    """O teste não cria nem altera orçamento, cliente ou agendamento."""
+    return [_aviso_teste_fabricio()] + calcular_avisos_retorno(registros)
+
+
+def _destino_whatsapp_aviso(aviso, telefone_teste=""):
+    from urllib.parse import quote as url_quote
+    telefone = (telefone_teste or aviso.get("telefone", "")) if aviso.get("teste") else aviso.get("telefone", "")
+    if not validar_telefone_cliente(telefone):
+        return None
+    if aviso.get("teste"):
+        mensagem = (
+            "Olá, Fabrício! Esta é uma mensagem de teste da F Climatização. "
+            "Em um acompanhamento real, após seis meses de uma higienização "
+            "registrada, entramos em contato para oferecer uma nova avaliação "
+            "ou higienização preventiva."
+        )
+    else:
+        mensagem = mensagem_retorno_whatsapp(aviso)
+    return "https://wa.me/55" + telefone + "?text=" + url_quote(mensagem)
+
+
 def painel_avisos_manutencao(registros):
-    """Sino discreto visível apenas quando há lembretes novos ou já lidos."""
-    avisos = calcular_avisos_retorno(registros)
-    try:
-        estado = _carregar_leituras_aviso() if avisos else {"lidos": {}}
-    except Exception:
-        # Falha de rede jamais deve travar o painel principal.
-        return
-    lidos = estado.get("lidos", {})
-    pendentes = [a for a in avisos if a["id"] not in lidos]
-    if not avisos:
-        return
-    st.markdown("""
-<style>
-div[class*="st-key-fc_notification_bell"] button {min-height:34px !important;
-  width:auto !important; padding:3px 10px !important; border-radius:10px !important;}
-</style>""", unsafe_allow_html=True)
-    espaco, sino = st.columns([8, 1], gap="small", vertical_alignment="center")
-    with sino:
-        label = str(len(pendentes)) if pendentes else " "
-        if st.button(label, icon=":material/notifications:",
-                     help="Lembretes de manutenção", key="fc_notification_bell"):
-            dialogo_avisos_manutencao(avisos)
-
-
-@st.dialog("Lembretes de manutenção")
-def dialogo_avisos_manutencao(avisos):
+    """Sino sempre visível e compacto; só destaca notificações não lidas."""
+    avisos = _avisos_visiveis(registros)
+    erro = None
     try:
         estado = _carregar_leituras_aviso()
     except Exception as exc:
-        st.error(f"Não foi possível consultar os avisos: {exc}")
-        return
+        estado = {"lidos": {}}
+        erro = str(exc)
     lidos = estado.get("lidos", {})
-    for aviso in sorted(avisos, key=lambda a: a["id"] in lidos):
+    novos = sum(1 for aviso in avisos if aviso["id"] not in lidos)
+
+    # A versão móvel do Streamlit empilha colunas; esta regra mantém
+    # as duas colunas na mesma linha, sem criar um botão gigantesco.
+    st.markdown("""
+    <style>
+    .st-key-fc_notif_linha [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important; align-items: center !important;
+        justify-content: flex-end !important; gap: 0 !important;
+    }
+    .st-key-fc_notif_linha [data-testid="column"]:first-child {
+        flex: 1 1 auto !important; width: auto !important; min-width: 0 !important;
+    }
+    .st-key-fc_notif_linha [data-testid="column"]:last-child {
+        flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;
+    }
+    .st-key-fc_notification_bell button {
+        width: auto !important; min-width: 39px !important;
+        max-width: 78px !important; height: 38px !important;
+        min-height: 38px !important; padding: 2px 9px !important;
+        border-radius: 12px !important; gap: 4px !important;
+        font-size: 12px !important; font-weight: 700 !important;
+        background: #182536 !important; border: 1px solid #354258 !important;
+        color: #9eafc3 !important; box-shadow: none !important;
+    }
+    .st-key-fc_notification_bell button [data-testid="stIconMaterial"] {
+        font-size: 19px !important; width: 20px !important;
+    }
+    .st-key-fc_notif_linha { margin: -8px 0 0 0 !important; }
+    .st-key-fc_notification_bell:has(button[kind="primary"]) button {
+        background: #142b42 !important; border-color: #ea9d25 !important;
+        color: #ffbe57 !important;
+    }
+    .st-key-fc_notif_linha button:focus { box-shadow: none !important; }
+    .st-key-fc_aviso_visto { opacity: .75; }
+    .st-key-fc_aviso_visto [data-testid="stVerticalBlockBorderWrapper"] {
+        background: #111a26 !important; border-color: #263344 !important;
+    }
+    .st-key-fc_aviso_novo [data-testid="stVerticalBlockBorderWrapper"] {
+        background: #152336 !important; border-color: #35537b !important;
+    }
+    </style>""", unsafe_allow_html=True)
+
+    with st.container(key="fc_notif_linha"):
+        _, coluna_sino = st.columns([9, 1], gap="small", vertical_alignment="center")
+        with coluna_sino:
+            if st.button(
+                str(novos) if novos else " ",
+                icon=":material/notifications:",
+                type="primary" if novos else "secondary",
+                key="fc_notification_bell",
+                help="Notificações",
+            ):
+                dialogo_avisos_manutencao(avisos, erro)
+
+
+@st.dialog("Notificações", width="small")
+def dialogo_avisos_manutencao(avisos, erro_inicial=None):
+    """Janela pequena, sem sair da página; lista não lidos antes dos lidos."""
+    if erro_inicial:
+        st.caption("Não foi possível atualizar o estado das notificações agora.")
+    try:
+        estado = _carregar_leituras_aviso() if not erro_inicial else {"lidos": {}}
+    except Exception:
+        estado = {"lidos": {}}
+    lidos = estado.get("lidos", {})
+
+    if not avisos:
+        st.caption("Nenhuma notificação.")
+        return
+    for aviso in sorted(avisos, key=lambda a: (a["id"] in lidos, a.get("vencimento", date.today()))):
         ja_lido = aviso["id"] in lidos
-        with st.container(border=True):
-            st.markdown(("<span style='color:#8190a4'>" if ja_lido else "<span style='color:#f6f9ff'>")
-                        + "**" + aviso["cliente"].replace("<", "&lt;").replace(">", "&gt;") + "**</span>",
-                        unsafe_allow_html=True)
-            st.caption(f'{aviso["telefone"]} · {aviso["tipo"]} · {aviso["quantidade"]} aparelho(s)')
-            st.caption(f'Serviço: {aviso["data_servico"].strftime("%d/%m/%Y")} · Pedido #{aviso["numero"]}')
-            telefone = aviso["telefone"]
+        nome = aviso["cliente"]
+        rotulo = "Teste de notificação" if aviso.get("teste") else nome
+        classe = "fc_aviso_visto" if ja_lido else "fc_aviso_novo"
+        with st.container(border=True, key=f"{classe}_{hashlib.sha256(aviso['id'].encode()).hexdigest()[:16]}"):
+            c1, c2 = st.columns([5, 1], vertical_alignment="center")
+            with c1:
+                st.markdown(f"**{rotulo}**")
+            with c2:
+                if not ja_lido:
+                    st.caption("● Nova")
+            if aviso.get("teste"):
+                st.caption("Fabrício Pereira · Higienização (simulação)")
+                telefone = aviso["telefone"]
+            else:
+                telefone = aviso["telefone"]
+                st.caption(f'{telefone} · {aviso["tipo"]} · {aviso["quantidade"]} aparelho(s)')
+                st.caption(f'Último serviço: {aviso["data_servico"].strftime("%d/%m/%Y")} · #{aviso["numero"]}')
+
+            destino = _destino_whatsapp_aviso(aviso, telefone)
+            token = hashlib.sha256(aviso["id"].encode()).hexdigest()[:16]
             if ja_lido:
-                from urllib.parse import quote as url_quote
-                destino_lido = ("https://wa.me/55" + telefone + "?text="
-                                + url_quote(mensagem_retorno_whatsapp(aviso)))
-                st.link_button("WhatsApp", destino_lido, use_container_width=False)
-            elif st.button("Chamar cliente", key="fc_aviso_" + hashlib.sha256(aviso["id"].encode()).hexdigest()[:18],
-                           icon=":material/chat:"):
+                if destino:
+                    st.link_button("WhatsApp", destino, icon=":material/chat:")
+            elif st.button(
+                "Chamar no WhatsApp", key=f"fc_aviso_chamar_{token}",
+                icon=":material/chat:", disabled=not bool(destino),
+            ):
                 try:
                     _marcar_aviso_lido(aviso, estado)
                 except Exception as exc:
-                    st.error(f"Falha ao salvar a leitura: {exc}")
+                    st.error(f"Não foi possível registrar a leitura: {exc}")
                     return
-                from urllib.parse import quote as url_quote
-                destino = "https://wa.me/55" + telefone + "?text=" + url_quote(mensagem_retorno_whatsapp(aviso))
-                st.session_state["_fc_ultimo_whatsapp_aviso"] = destino
-                # Tenta abrir automaticamente e mostra um link manual se o
-                # navegador bloquear a abertura de outra janela.
-                components.html("<script>window.open(" + json.dumps(destino) + ", '_blank');</script>", height=0)
-                st.link_button("Abrir WhatsApp", destino)
-                st.caption("Aviso marcado como lido.")
+                # O navegador pode bloquear abas abertas por JavaScript.
+                # O link abaixo oferece um segundo caminho seguro.
+                components.html(
+                    "<script>window.open(" + json.dumps(destino) + ", '_blank');</script>",
+                    height=0,
+                )
+                st.link_button("Abrir WhatsApp", destino, icon=":material/open_in_new:")
+                st.caption("Notificação marcada como visualizada.")
 
 def painel_semana_admin(registros):
     """Agenda desta semana em ordem cronológica, com acesso à agenda completa."""
