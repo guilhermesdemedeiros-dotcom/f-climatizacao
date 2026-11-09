@@ -726,6 +726,8 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_tipo_imovel",
     "cliente_andar",
     "cliente_area",
+    "novo_orcamento_garantia_servicos",
+    "novo_orcamento_garantia_materiais",
     "cliente_adicional_sim",
     "cliente_adicional_desc",
     "cliente_observacoes",
@@ -2430,6 +2432,39 @@ def pagamento_documento(orcamento):
     return {}
 
 
+OPCOES_GARANTIA = ["3 meses", "6 meses", "1 ano", "2 anos"]
+
+
+def garantia_documento(orcamento):
+    """Garantias escolhidas para o documento; padrão apenas para registros novos."""
+    garantia = orcamento.get("garantia") or {}
+    if not isinstance(garantia, dict):
+        garantia = {}
+    return {
+        "servicos": garantia.get("servicos", "3 meses") if garantia.get("servicos", "3 meses") in OPCOES_GARANTIA else "3 meses",
+        "materiais": garantia.get("materiais", "3 meses") if garantia.get("materiais", "3 meses") in OPCOES_GARANTIA else "3 meses",
+    }
+
+
+def campos_garantia(prefixo, documento=None, *, desabilitado=False):
+    """Usado na criação e na edição, sem afetar o catálogo de preços."""
+    valores = garantia_documento(documento or {})
+    c1, c2 = st.columns(2)
+    with c1:
+        prazo_servico = st.selectbox(
+            "Garantia dos serviços", OPCOES_GARANTIA,
+            index=OPCOES_GARANTIA.index(valores["servicos"]),
+            key=f"{prefixo}_garantia_servicos", disabled=desabilitado,
+        )
+    with c2:
+        prazo_material = st.selectbox(
+            "Garantia dos materiais", OPCOES_GARANTIA,
+            index=OPCOES_GARANTIA.index(valores["materiais"]),
+            key=f"{prefixo}_garantia_materiais", disabled=desabilitado,
+        )
+    return {"servicos": prazo_servico, "materiais": prazo_material}
+
+
 def gerar_pdf(orcamento):
     buffer = BytesIO()
 
@@ -2660,6 +2695,27 @@ def gerar_pdf(orcamento):
         )
     )
     story += [cliente_tbl, Spacer(1, 6 * mm)]
+
+    # Documentos anteriores à função de garantias não recebem prazo presumido.
+    if isinstance(orcamento.get("garantia"), dict) and orcamento["garantia"]:
+        prazos_garantia_pdf = garantia_documento(orcamento)
+        story.append(Paragraph("<b>Garantia informada</b>", title_style))
+        tabela_garantia = Table(
+            [
+                ["Serviços", prazos_garantia_pdf["servicos"]],
+                ["Materiais", prazos_garantia_pdf["materiais"]],
+            ],
+            colWidths=[42 * mm, 132 * mm],
+        )
+        tabela_garantia.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TEXTCOLOR", (0, 0), (0, -1), azul),
+            ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F6F8FB")),
+            ("PADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story += [tabela_garantia, Spacer(1, 6 * mm)]
 
     pagamento_pdf = pagamento_documento(orcamento)
 
@@ -4652,6 +4708,13 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                 ):
                     confirmar_status_com_agenda(numero, novo_status, pagamento_status)
 
+            # Garantia por documento: disponível apenas até concluir a venda.
+            st.markdown("#### Garantias")
+            garantia_adm = campos_garantia(
+                f"adm_doc_{numero}", o,
+                desabilitado=status_atual == "Faturado / Concluído",
+            )
+
             # ---------------------------------------------
             # DESCONTO GERAL
             # ---------------------------------------------
@@ -5270,6 +5333,8 @@ def aba_orcamentos(status_fixo="Orçamentos"):
             preview["itens"] = itens_editados[:]
             preview["opcoes_equipamentos"] = opcoes_editadas if opcoes else []
             preview["desconto_percentual"] = float(desconto_geral)
+            if status_atual != "Faturado / Concluído":
+                preview["garantia"] = copy.deepcopy(garantia_adm)
 
             if adicionar_novo and item_para_adicionar:
                 preview["itens"].append(item_para_adicionar)
@@ -5303,6 +5368,10 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                 ),
                 "desconto_percentual": float(desconto_geral),
                 "deslocamento": deslocamento_editado,
+                "garantia": (
+                    garantia_adm if status_atual != "Faturado / Concluído"
+                    else garantia_documento(o)
+                ),
             }
 
             sig_auto = assinatura_dados(estado_auto)
@@ -5334,6 +5403,8 @@ def aba_orcamentos(status_fixo="Orçamentos"):
                         opcoes_editadas if opcoes else []
                     )
                     o["desconto_percentual"] = float(desconto_geral)
+                    if status_atual != "Faturado / Concluído":
+                        o["garantia"] = copy.deepcopy(garantia_adm)
                     if deslocamento_editado is not None:
                         o["deslocamento"] = copy.deepcopy(deslocamento_editado)
                     o["atualizado_em"] = datetime.now(
@@ -6009,7 +6080,7 @@ def aba_regras():
     secao("Regras", "Configure valores e avisos usados nas estimativas.")
 
     config["regras"]["adicional_apartamento_2_mais"] = st.number_input(
-        "Adicional a partir do 2º piso",
+        "Adicional a partir do 2º piso (qualquer imóvel)",
         min_value=0.0,
         value=float(config["regras"].get("adicional_apartamento_2_mais", 0) or 0),
         step=10.0,
@@ -7906,15 +7977,14 @@ def editor_orcamento_cliente():
             key=f"edit_tipo_imovel_{numero}",
         )
 
-        edit_andar = 0
-        if edit_tipo_imovel == "Apartamento":
-            edit_andar = st.number_input(
-                "Andar/piso",
-                min_value=0,
-                value=int(orcamento.get("andar") or 1),
-                step=1,
-                key=f"edit_andar_{numero}",
-            )
+        edit_andar = st.number_input(
+            "Andar/piso do serviço",
+            min_value=0,
+            value=int(orcamento.get("andar") or 1),
+            step=1,
+            help="A partir do 2º piso, o adicional configurado pode ser aplicado em casas, apartamentos e outros imóveis.",
+            key=f"edit_andar_{numero}",
+        )
 
         area_atual = orcamento.get("area_ambiente", "Não sei")
         opcoes_area_edit = OPCOES_AREA[:]
@@ -8046,10 +8116,17 @@ def editor_orcamento_cliente():
         "Nesta área você altera somente a composição do orçamento."
     )
 
+    st.markdown("#### Garantias")
+    garantia_editada = campos_garantia(
+        f"edit_documento_{numero}", orcamento,
+        desabilitado=orcamento.get("status") == "Faturado / Concluído",
+    )
+
     if st.button(
         "SALVAR ALTERAÇÕES DO ORÇAMENTO",
         type="primary",
         use_container_width=True,
+        disabled=orcamento.get("status") == "Faturado / Concluído",
         key=f"salvar_edicao_completa_{numero}",
     ):
         if not edit_nome.strip():
@@ -8082,7 +8159,7 @@ def editor_orcamento_cliente():
             )
 
         # Regra automática de apartamento
-        if edit_tipo_imovel == "Apartamento" and int(edit_andar) >= 2:
+        if int(edit_andar) >= 2:
             valor_andar = float(
                 config.get("regras", {}).get(
                     "adicional_apartamento_2_mais",
@@ -8325,12 +8402,9 @@ def editor_orcamento_cliente():
         orcamento["opcoes_equipamentos"] = novas_opcoes
         orcamento["itens"] = novos_itens
         orcamento["tipo_imovel"] = edit_tipo_imovel
-        orcamento["andar"] = (
-            int(edit_andar)
-            if edit_tipo_imovel == "Apartamento"
-            else None
-        )
+        orcamento["andar"] = int(edit_andar)
         orcamento["area_ambiente"] = edit_area
+        orcamento["garantia"] = copy.deepcopy(garantia_editada)
         orcamento["adicional"] = {
             "solicitado": edit_adicional == "Sim",
             "descricao": edit_adicional_desc.strip(),
@@ -8880,19 +8954,14 @@ def pagina_cliente(interno=False):
         key="cliente_tipo_imovel",
     )
 
-    andar = 0
-    if tipo_imovel == "Apartamento":
-        andar = st.number_input(
-            "Andar/piso",
-            min_value=0,
-            value=1,
-            step=1,
-            help=(
-                "A partir do 2º piso pode haver adicional, "
-                "conforme configuração da empresa."
-            ),
-            key="cliente_andar",
-        )
+    andar = st.number_input(
+        "Andar/piso do serviço",
+        min_value=0,
+        value=1,
+        step=1,
+        help="O adicional do 2º piso vale para casas, apartamentos e outros imóveis.",
+        key="cliente_andar",
+    )
 
     garantir_opcao_valida("cliente_area", OPCOES_AREA)
 
@@ -8976,6 +9045,9 @@ def pagina_cliente(interno=False):
         else:
             st.info("Ainda não há clientes cadastrados. Selecione Novo cliente.")
 
+    secao("Garantias", "Escolha o prazo que constará no documento.")
+    garantia_novo = campos_garantia("novo_orcamento", {})
+
     nome_cliente = st.text_input("Nome", key="cliente_nome")
     telefone = st.text_input(
         "Telefone (DDD + número)", key="cliente_telefone",
@@ -9004,7 +9076,7 @@ def pagina_cliente(interno=False):
     )
     if cobrar_km_novo:
         subtotal_comum_previa += km_novo * tarifa_km_novo
-    if tipo_imovel == "Apartamento" and int(andar) >= 2:
+    if int(andar) >= 2:
         subtotal_comum_previa += float(
             config.get("regras", {}).get("adicional_apartamento_2_mais", 0) or 0
         )
@@ -9285,7 +9357,7 @@ def pagina_cliente(interno=False):
                         )
                     )
 
-        if tipo_imovel == "Apartamento" and int(andar) >= 2:
+        if int(andar) >= 2:
             valor_andar = float(
                 config["regras"].get(
                     "adicional_apartamento_2_mais",
@@ -9339,11 +9411,12 @@ def pagina_cliente(interno=False):
             "capacidade_aparelho_existente": capacidade_existente,
             "instalacao_inclusa_equipamento": situacao_tem_compra(possui),
             "tipo_imovel": tipo_imovel,
-            "andar": int(andar) if tipo_imovel == "Apartamento" else None,
+            "andar": int(andar),
             "area_ambiente": area,
             "equipamento_id": equipamento_id,
             "modo_compra": modo_compra,
             "status": "Orçamento",
+            "garantia": copy.deepcopy(garantia_novo),
             "desconto_percentual": limitar_percentual(desconto_geral_novo),
             "opcoes_equipamentos": opcoes_equipamentos,
             "itens": itens,
