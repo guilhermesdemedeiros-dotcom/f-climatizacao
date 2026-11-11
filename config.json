@@ -32,7 +32,7 @@
       "precos": {
         "9.000 BTUs": 130.0,
         "12.000 BTUs": 150.0,
-        "18.000 BTUs": 160.0,
+        "18.000 BTUs": 150.0,
         "24.000 BTUs": 180.0
       },
       "cobranca_por_ponto": false
