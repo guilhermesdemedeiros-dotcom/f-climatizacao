@@ -314,6 +314,14 @@
       "tipo": "Convencional",
       "preco": 2050.0,
       "ativo": true
+    },
+    "1119d9c198b5": {
+      "id": "1119d9c198b5",
+      "marca": "Midea",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 2300.0,
+      "ativo": true
     }
   },
   "regras": {
