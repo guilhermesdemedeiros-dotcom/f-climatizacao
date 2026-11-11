@@ -306,6 +306,14 @@
       "tipo": "Convencional",
       "preco": 1850.0,
       "ativo": true
+    },
+    "9ce05ed987bd": {
+      "id": "9ce05ed987bd",
+      "marca": "Midea",
+      "capacidade": "9.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 2050.0,
+      "ativo": true
     }
   },
   "regras": {
