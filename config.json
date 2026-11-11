@@ -56,9 +56,9 @@
       "descricao": "Carga de gás refrigerante conforme capacidade do equipamento.",
       "precos": {
         "9.000 BTUs": 280.0,
-        "12.000 BTUs": 290.0,
+        "12.000 BTUs": 300.0,
         "18.000 BTUs": 400.0,
-        "24.000 BTUs": 480.0
+        "24.000 BTUs": 490.0
       },
       "cobranca_por_ponto": false
     },
