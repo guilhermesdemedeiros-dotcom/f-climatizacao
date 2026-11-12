@@ -728,6 +728,8 @@ CLIENT_DRAFT_FIELDS = [
     "cliente_area",
     "novo_orcamento_garantia_servicos",
     "novo_orcamento_garantia_materiais",
+    "novo_orcamento_exibir_garantia_servicos",
+    "novo_orcamento_exibir_garantia_materiais",
     "cliente_adicional_sim",
     "cliente_adicional_desc",
     "cliente_observacoes",
@@ -2436,33 +2438,60 @@ OPCOES_GARANTIA = ["3 meses", "6 meses", "1 ano", "2 anos"]
 
 
 def garantia_documento(orcamento):
-    """Garantias escolhidas para o documento; padrão apenas para registros novos."""
+    """Prazos e visibilidade independentes, inclusive para documentos antigos.
+
+    Garantias já registradas antes dos controles permanecem visíveis.
+    Sem garantia registrada, ambas começam ocultas, sem inventar condições.
+    """
     garantia = orcamento.get("garantia") or {}
     if not isinstance(garantia, dict):
         garantia = {}
-    return {
-        "servicos": garantia.get("servicos", "3 meses") if garantia.get("servicos", "3 meses") in OPCOES_GARANTIA else "3 meses",
-        "materiais": garantia.get("materiais", "3 meses") if garantia.get("materiais", "3 meses") in OPCOES_GARANTIA else "3 meses",
-    }
+    valores = {}
+    for tipo in ("servicos", "materiais"):
+        prazo = garantia.get(tipo, "3 meses")
+        valores[tipo] = prazo if prazo in OPCOES_GARANTIA else "3 meses"
+        chave_exibir = f"exibir_{tipo}"
+        # Compatibilidade: documentos antigos que já possuíam prazo exibem-no.
+        valores[chave_exibir] = bool(garantia.get(chave_exibir, tipo in garantia))
+    return valores
 
 
 def campos_garantia(prefixo, documento=None, *, desabilitado=False):
-    """Usado na criação e na edição, sem afetar o catálogo de preços."""
+    """Garantias opcionais de serviços e produtos, editáveis até concluir a venda."""
     valores = garantia_documento(documento or {})
     c1, c2 = st.columns(2)
     with c1:
+        exibir_servicos = st.checkbox(
+            "Exibir garantia dos serviços",
+            value=valores["exibir_servicos"],
+            key=f"{prefixo}_exibir_garantia_servicos",
+            disabled=desabilitado,
+        )
         prazo_servico = st.selectbox(
-            "Garantia dos serviços", OPCOES_GARANTIA,
+            "Prazo dos serviços", OPCOES_GARANTIA,
             index=OPCOES_GARANTIA.index(valores["servicos"]),
-            key=f"{prefixo}_garantia_servicos", disabled=desabilitado,
-        )
+            key=f"{prefixo}_garantia_servicos",
+            disabled=desabilitado or not exibir_servicos,
+        ) if exibir_servicos else valores["servicos"]
     with c2:
-        prazo_material = st.selectbox(
-            "Garantia dos materiais", OPCOES_GARANTIA,
-            index=OPCOES_GARANTIA.index(valores["materiais"]),
-            key=f"{prefixo}_garantia_materiais", disabled=desabilitado,
+        exibir_materiais = st.checkbox(
+            "Exibir garantia dos produtos/materiais",
+            value=valores["exibir_materiais"],
+            key=f"{prefixo}_exibir_garantia_materiais",
+            disabled=desabilitado,
         )
-    return {"servicos": prazo_servico, "materiais": prazo_material}
+        prazo_material = st.selectbox(
+            "Prazo dos produtos/materiais", OPCOES_GARANTIA,
+            index=OPCOES_GARANTIA.index(valores["materiais"]),
+            key=f"{prefixo}_garantia_materiais",
+            disabled=desabilitado or not exibir_materiais,
+        ) if exibir_materiais else valores["materiais"]
+    return {
+        "servicos": prazo_servico,
+        "materiais": prazo_material,
+        "exibir_servicos": exibir_servicos,
+        "exibir_materiais": exibir_materiais,
+    }
 
 
 def gerar_pdf(orcamento):
@@ -2696,23 +2725,23 @@ def gerar_pdf(orcamento):
     )
     story += [cliente_tbl, Spacer(1, 6 * mm)]
 
-    # Documentos anteriores à função de garantias não recebem prazo presumido.
-    if isinstance(orcamento.get("garantia"), dict) and orcamento["garantia"]:
-        prazos_garantia_pdf = garantia_documento(orcamento)
-        story.append(Paragraph("<b>Garantia informada</b>", title_style))
-        tabela_garantia = Table(
-            [
-                ["Serviços", prazos_garantia_pdf["servicos"]],
-                ["Materiais", prazos_garantia_pdf["materiais"]],
-            ],
-            colWidths=[42 * mm, 132 * mm],
-        )
+    # No PDF, exibir SOMENTE as garantias ativadas para este documento.
+    # A ausência de cadastro anterior nunca cria uma garantia presumida.
+    prazos_garantia_pdf = garantia_documento(orcamento)
+    linhas_garantia_pdf = []
+    if prazos_garantia_pdf["exibir_servicos"]:
+        linhas_garantia_pdf.append(["Serviços", prazos_garantia_pdf["servicos"]])
+    if prazos_garantia_pdf["exibir_materiais"]:
+        linhas_garantia_pdf.append(["Produtos / materiais", prazos_garantia_pdf["materiais"]])
+    if linhas_garantia_pdf:
+        story.append(Paragraph("<b>Garantias</b>", title_style))
+        tabela_garantia = Table(linhas_garantia_pdf, colWidths=[42 * mm, 132 * mm])
         tabela_garantia.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("TEXTCOLOR", (0, 0), (0, -1), azul),
             ("GRID", (0, 0), (-1, -1), 0.4, cinza_claro),
-            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F6F8FB")),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F6F8FB")),
             ("PADDING", (0, 0), (-1, -1), 6),
         ]))
         story += [tabela_garantia, Spacer(1, 6 * mm)]
@@ -9045,7 +9074,7 @@ def pagina_cliente(interno=False):
         else:
             st.info("Ainda não há clientes cadastrados. Selecione Novo cliente.")
 
-    secao("Garantias", "Escolha o prazo que constará no documento.")
+    secao("Garantias", "Marque apenas as garantias que devem aparecer no documento.")
     garantia_novo = campos_garantia("novo_orcamento", {})
 
     nome_cliente = st.text_input("Nome", key="cliente_nome")
