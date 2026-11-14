@@ -289,7 +289,7 @@
       "capacidade": "12.000 BTUs",
       "tipo": "Convencional",
       "preco": 2200.0,
-      "ativo": true
+      "ativo": false
     },
     "a1f2e7093939": {
       "id": "a1f2e7093939",
