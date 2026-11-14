@@ -257,7 +257,7 @@
       "capacidade": "12.000 BTUs",
       "tipo": "Convencional",
       "preco": 2300.0,
-      "ativo": true
+      "ativo": false
     },
     "ec050e51b33a": {
       "id": "ec050e51b33a",
