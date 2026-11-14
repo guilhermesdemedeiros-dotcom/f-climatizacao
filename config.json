@@ -241,7 +241,7 @@
       "capacidade": "12.000 BTUs",
       "tipo": "Convencional",
       "preco": 2100.0,
-      "ativo": true
+      "ativo": false
     },
     "ebeb0377003c": {
       "id": "ebeb0377003c",
