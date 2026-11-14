@@ -322,6 +322,14 @@
       "tipo": "Inverter",
       "preco": 2300.0,
       "ativo": true
+    },
+    "e779a8b4101f": {
+      "id": "e779a8b4101f",
+      "marca": "Super Split",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 2300.0,
+      "ativo": true
     }
   },
   "regras": {
