@@ -194,7 +194,7 @@
   },
   "equipamentos": {
     "eq_1791079198": {
-      "ativo": true,
+      "ativo": false,
       "marca": "Luxor",
       "capacidade": "12.000 BTUs",
       "tipo": "Inverter",
