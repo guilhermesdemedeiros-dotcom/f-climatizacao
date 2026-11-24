@@ -330,6 +330,14 @@
       "tipo": "Inverter",
       "preco": 2450.0,
       "ativo": true
+    },
+    "49764acb707b": {
+      "id": "49764acb707b",
+      "marca": "Clímax",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 2450.0,
+      "ativo": true
     }
   },
   "regras": {
