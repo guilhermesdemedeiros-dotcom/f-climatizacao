@@ -338,6 +338,14 @@
       "tipo": "Inverter",
       "preco": 2450.0,
       "ativo": true
+    },
+    "72115ed41f3f": {
+      "id": "72115ed41f3f",
+      "marca": "Conforterm com wi-fi",
+      "capacidade": "12.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 2450.0,
+      "ativo": true
     }
   },
   "regras": {
