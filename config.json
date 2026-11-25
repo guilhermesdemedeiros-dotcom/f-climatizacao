@@ -354,6 +354,14 @@
       "tipo": "Convencional",
       "preco": 3750.0,
       "ativo": true
+    },
+    "92f17f92e3a5": {
+      "id": "92f17f92e3a5",
+      "marca": "Xion",
+      "capacidade": "24.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 4000.0,
+      "ativo": true
     }
   },
   "regras": {
