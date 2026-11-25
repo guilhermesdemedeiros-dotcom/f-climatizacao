@@ -362,6 +362,14 @@
       "tipo": "Inverter",
       "preco": 4000.0,
       "ativo": true
+    },
+    "abd165fa8725": {
+      "id": "abd165fa8725",
+      "marca": "Conforterm com wifi",
+      "capacidade": "24.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 4050.0,
+      "ativo": true
     }
   },
   "regras": {
