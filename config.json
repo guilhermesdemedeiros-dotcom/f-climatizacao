@@ -386,6 +386,14 @@
       "tipo": "Inverter",
       "preco": 3980.0,
       "ativo": true
+    },
+    "8525cc560a22": {
+      "id": "8525cc560a22",
+      "marca": "Xion",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Convencional",
+      "preco": 2900.0,
+      "ativo": true
     }
   },
   "regras": {
