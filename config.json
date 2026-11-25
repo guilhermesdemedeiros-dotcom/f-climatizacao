@@ -402,6 +402,14 @@
       "tipo": "Inverter",
       "preco": 3400.0,
       "ativo": true
+    },
+    "2c8aa6cf1d14": {
+      "id": "2c8aa6cf1d14",
+      "marca": "Gree",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 4000.0,
+      "ativo": true
     }
   },
   "regras": {
