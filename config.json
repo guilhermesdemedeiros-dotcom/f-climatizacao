@@ -394,6 +394,14 @@
       "tipo": "Convencional",
       "preco": 2900.0,
       "ativo": true
+    },
+    "596fbe6d47b5": {
+      "id": "596fbe6d47b5",
+      "marca": "Xion com wifi",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 3400.0,
+      "ativo": true
     }
   },
   "regras": {
