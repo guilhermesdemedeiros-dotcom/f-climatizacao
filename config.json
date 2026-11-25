@@ -378,6 +378,14 @@
       "tipo": "Inverter",
       "preco": 3750.0,
       "ativo": true
+    },
+    "1110a61bb65c": {
+      "id": "1110a61bb65c",
+      "marca": "Midea com IA e wifi",
+      "capacidade": "18.000 BTUs",
+      "tipo": "Inverter",
+      "preco": 3980.0,
+      "ativo": true
     }
   },
   "regras": {
