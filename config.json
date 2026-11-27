@@ -337,7 +337,7 @@
       "capacidade": "12.000 BTUs",
       "tipo": "Inverter",
       "preco": 2400.0,
-      "ativo": true
+      "ativo": false
     },
     "06404b92e1ec": {
       "id": "06404b92e1ec",
